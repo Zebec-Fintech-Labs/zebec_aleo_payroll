@@ -1,0 +1,9 @@
+{
+  "program": "iarc22",
+  "version": "0.1.0",
+  "description": "",
+  "license": "MIT",
+  "leo": "4.3.4",
+  "dependencies": null,
+  "dev_dependencies": null
+}
