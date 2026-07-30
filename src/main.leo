@@ -132,7 +132,7 @@ program aacs_payroll.aleo {
         topup_count: u64,
     }
 
-    // Receiver payroll ticker which can be used for operation like withdraw
+    // Receiver payroll ticket which can be used for operation like withdraw
     record ReceiverPayrollTicket {
         owner: address,
         sender: address,
@@ -141,6 +141,7 @@ program aacs_payroll.aleo {
         stream_id: field,
     }
 
+    // Withdrawer payroll tiket which can be used for operation like withdraw on behalf of receiver
     record WithdrawerPayrollTicket {
         owner: address,
         full_amount: u128,
@@ -149,35 +150,6 @@ program aacs_payroll.aleo {
         receiver: address,
         token_program: identifier,
     }
-
-    // record PayrollStream {
-    //     owner: address,
-    //     sender: address,
-    //     receiver: address,
-    //     stream_id: field,
-    //     stream_token: field,
-    //     cliff_percentage: u128,
-    //     full_amount: u128,
-    //     deposited_amount: u128,
-    //     start_time: i64,
-    //     end_time: i64,
-    //     last_withdrawn_timestamp: i64,
-    //     withdrawn_amount: u128,
-    //     stream_duration: u128,
-    //     is_pausable: bool,
-    //     paused_timestamp: i64,
-    //     paused_interval: i64,
-    //     canceled_timestamp: i64,
-    //     cancelable_by_sender: bool,
-    //     cancelable_by_recipient: bool,
-    //     autowithdraw_frequency: u128,
-    //     auto_withdrawable: bool,
-    //     can_topup: bool,
-    //     topup_count: u128,
-    //     covered_until: i64,
-    // }
-
-
 
     fn create_stream_private(
         params: CreateStreamParams,
@@ -214,7 +186,8 @@ program aacs_payroll.aleo {
 
         assert(auto_withdrawal_fee + stream_fee >= credit_input_record.microcredits);
 
-        let (change1, change2): (credits.aleo::credits, credits.aleo::credits) = credits.aleo::split(credit_input_record, auto_withdrawal_fee);
+        let (change1, change2): (credits.aleo::credits, credits.aleo::credits) = 
+            credits.aleo::split(credit_input_record, auto_withdrawal_fee);
 
         let (auto_change, f_auto_withdrawal_fee_transfer): (credits.aleo::credits, Final) =
             credits.aleo::transfer_private_to_public(change1, config.withdrawer, auto_withdrawal_fee);
@@ -236,7 +209,7 @@ program aacs_payroll.aleo {
             is_cancelable: params.is_cancelable,
             is_pausable: params.is_pausable,
             can_topup: params.can_topup,
-            topup_count: 1u64,
+            topup_count: 1u64, // initial funding counts as topup
         };
 
         let receiver_ticket = ReceiverPayrollTicket {
@@ -346,6 +319,56 @@ program aacs_payroll.aleo {
             f_stream_fee_transfer.run();
             f_deposit_amount_transfer.run();
         };
+    }
+
+    fn pause_resume_stream_private(
+        ticket_record: SenderPayrollTicket,
+    )-> (SenderPayrollTicket, Final) {
+        let signer: address = std::ctx::signer();
+        // Check signer is the sender payroll ticket owner
+        assert(signer == ticket_record.owner);
+
+        // Check if stream is pausable
+        assert(ticket_record.is_pausable);
+        let stream_id = ticket_record.stream_id;
+
+        let sender_ticket = SenderPayrollTicket { ..ticket_record };
+        return (sender_ticket, final {
+            let now: i64 = std::ctx::block_timestamp();
+            // Check: Validate the streams exists
+            assert(stream_anchors.contains(stream_id));
+            let stream = stream_anchors.get(stream_id);
+            // Check: Stream is not cancelled
+            assert(!stream.cancelled);
+            // Check: Stream has started
+            assert(stream.start_time <= now);
+
+            if (stream.paused) {
+                // |--------------|-----|--------------|-------------|
+                // st               ppi                lpt         now
+                let prev_paused_interval: u64 = stream.paused_interval; // may be 0 or value.
+                assert(stream.last_paused_time <= now);
+                let paused_interval = prev_paused_interval + (now as u64 - stream.last_paused_time as u64);
+                let resumed_stream = StreamAnchor {
+                    ..stream
+                };
+                resumed_stream.paused_interval = paused_interval;
+                resumed_stream.paused  = false;
+                resumed_stream.last_paused_time = 0i64;
+                stream_anchors.set(stream_id, resumed_stream);
+            } else {
+                let prev_paused_interval: u64 = stream.paused_interval;
+                let elapsed_duration: u64 = (now as u64 - stream.start_time as u64) - prev_paused_interval;
+                // Check: Stream has not ended
+                assert(elapsed_duration < stream.duration);
+                let paused_stream = StreamAnchor {
+                    ..stream
+                };
+                paused_stream.paused = true;
+                paused_stream.last_paused_time = now;
+                stream_anchors.set(stream_id, paused_stream); 
+            }
+        });
     }
     
     // =========================================================================
