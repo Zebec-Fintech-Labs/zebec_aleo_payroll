@@ -277,11 +277,15 @@ program aacs_payroll.aleo {
             assert(chain_config.platform_fee == config.platform_fee);
 
             // Checks: backend-signed token price
+            // Verify token price has not expired.
+            assert(now < token_price.price_expiry);
+            // Verify nonce is not used. (Resolves replay attack)
+            let used = token_price_nonces.get_or_use(token_price.nonce, false);
+            assert(!used);
+            // Message the admin signed: token id || prices || expiry || nonce.
+            let price_message: field = BHP256::hash_to_field(token_price);
             // Verified on-chain with a Schnorr signature against the config
             // admin's public key.
-            assert(now < token_price.price_expiry);
-            // Message the admin signed: token id || price || expiry.
-            let price_message: field = BHP256::hash_to_field(token_price);
             let price_valid: bool =
                 std::sig::verify_schnorr(price_signature, config.admin, price_message);
             assert(price_valid);
