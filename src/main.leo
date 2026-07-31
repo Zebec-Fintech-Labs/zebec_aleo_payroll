@@ -541,6 +541,11 @@ program aacs_payroll.aleo {
         });
     }
 
+    view fn get_stream_anchor(stream_id: field) -> StreamAnchor {
+        assert(stream_anchors.contains(stream_id));
+        return stream_anchors.get(stream_id);
+    }
+
     // =========================================================================
     // Admin: configuration management
     // =========================================================================
@@ -645,6 +650,26 @@ program aacs_payroll.aleo {
         };
     }
 
+    view fn get_payroll_config(config_name: field) -> PayrollConfig {
+        assert(payroll_config.contains(config_name));
+        return payroll_config.get(config_name);
+    }
+
+    view fn get_fee_tier(config_name: field, index: u8) -> FeeTier {
+        assert(index < MAX_FEE_TIERS);
+        let tier_key: field = BHP256::hash_to_field(
+            FeeTierKey { config: config_name, index: index },
+        );
+        assert(fee_tiers.contains(tier_key));
+        return fee_tiers.get(tier_key);
+    }
+
+    view fn is_token_whitelisted(config_name: field, token: identifier) -> bool {
+        let whitelist_key: field = BHP256::hash_to_field(
+            WhitelistKey { config: config_name, token_program: token },
+        );
+        return whitelisted_token_programs.get_or_use(whitelist_key, false);
+    }
     // This is the constructor for the program.
     // The constructor allows you to manage program upgrades.
     // It is called when the program is deployed or upgraded.
@@ -654,7 +679,7 @@ program aacs_payroll.aleo {
     //  - @checksum(mapping="credits.aleo/fixme", key="0field")
     //  - @custom
     // For more information, please refer to the documentation: `https://docs.leo-lang.org/guides/upgradability`
-    @noupgrade
+    @admin(address="aleo12czxn500cyj9a7lweuft6r4rrckthfck5k8440qh7atgrnt5kupqsfh038")
     constructor() {}
 }
 
