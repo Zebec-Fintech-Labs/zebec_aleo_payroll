@@ -1,0 +1,48 @@
+{
+  // Visit https://aka.ms/tsconfig to read more about this file
+  "compilerOptions": {
+    "declaration": true,
+    "declarationMap": false,
+    "exactOptionalPropertyTypes": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    // Environment Settings
+    // See also https://aka.ms/tsconfig/module
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    // Stricter Typechecking Options
+    "noUncheckedIndexedAccess": true,
+    "noUncheckedSideEffectImports": true,
+    // Style Options
+    // "noImplicitReturns": true,
+    // "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "outDir": "./dist",
+    // File Layout
+    "rootDir": "./src",
+    "skipLibCheck": true,
+    // For nodejs:
+    // "lib": ["esnext"],
+    // Other Outputs
+    "sourceMap": true,
+    // "noFallthroughCasesInSwitch": true,
+    // "noPropertyAccessFromIndexSignature": true,
+    // Recommended Options
+    "strict": true,
+    "target": "esnext",
+    "types": [
+      "node",
+      "mocha"
+    ],
+    "verbatimModuleSyntax": false
+  },
+  "exclude": [
+    "node_modules",
+    "test"
+  ],
+  "include": [
+    "src"
+  ]
+}
