@@ -1,5 +1,5 @@
 /**
- * Helpers for locating unspent records needed by `aacs_payroll.aleo`
+ * Helpers for locating unspent records needed by `aacs_payroll_v2.aleo`
  * transitions: `credits.aleo` records for fees, IARC22 token records for
  * stream deposits, and payroll ticket records for stream management.
  */

@@ -31,13 +31,14 @@ describe("fieldLiteral", () => {
 });
 
 describe("identLiteral", () => {
-  it("wraps valid identifiers in single quotes", () => {
-    assert.equal(identLiteral("my_token.aleo"), "'my_token.aleo'");
-    assert.equal(identLiteral("x.aleo"), "'x.aleo'");
+  it("wraps valid bare identifiers in single quotes", () => {
+    assert.equal(identLiteral("my_token"), "'my_token'");
+    assert.equal(identLiteral("x"), "'x'");
   });
   it("rejects invalid identifiers", () => {
     assert.throws(() => identLiteral("1foo"));
     assert.throws(() => identLiteral("a-b"));
+    assert.throws(() => identLiteral("my_token.aleo"));
     assert.throws(() => identLiteral("a".repeat(32)));
   });
 });
@@ -56,7 +57,6 @@ describe("struct serializers", () => {
       withdrawFrequency: 60n,
       startNow: true,
       canTopup: false,
-      tokenProgram: "my_token.aleo",
       initialBufferAmount: 0n,
     });
     assert.equal(
@@ -64,8 +64,7 @@ describe("struct serializers", () => {
       `{ receiver: ${RECEIVER}, stream_id: 42field, amount: 1000000u128, ` +
       `start_time: 1800000000i64, duration: 3600u64, is_cancelable: true, ` +
       `is_pausable: false, auto_withdrawable: true, withdraw_frequency: 60u64, ` +
-      `start_now: true, can_topup: false, token_program: 'my_token.aleo', ` +
-      `initial_buffer_amount: 0u128 }`,
+      `start_now: true, can_topup: false, initial_buffer_amount: 0u128 }`,
     );
     // Must parse with the real snarkVM plaintext parser.
     Plaintext.fromString(text).free();
@@ -83,7 +82,7 @@ describe("struct serializers", () => {
     Plaintext.fromString(config).free();
 
     const price = tokenPriceToPlaintext({
-      streamToken: "token.aleo",
+      streamToken: "token",
       streamTokenPriceUsd: 1_000_000n,
       aleoPriceUsd: 500_000n,
       priceExpiry: 1_893_456_000n,

@@ -1,5 +1,5 @@
 /**
- * aacs-payroll-sdk — TypeScript SDK for the `aacs_payroll.aleo` program.
+ * aacs-payroll-sdk — TypeScript SDK for the `aacs_payroll_v2.aleo` program.
  */
 
 export {

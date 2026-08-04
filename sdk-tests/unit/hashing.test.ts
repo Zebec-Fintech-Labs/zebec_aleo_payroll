@@ -18,9 +18,9 @@ const TIER_KEY =
 const WHITELIST_KEY =
   "5949549857295180779432337181339499322185250953286779710073517871832327878616field";
 
-// console.log("whitelistkey", whitelistKey("12345", "my_token.aleo"));
+// console.log("whitelistkey", whitelistKey("12345", "my_token"));
 // console.log("pricehash", tokenPriceMessage({
-//   streamToken: "token.aleo",
+//   streamToken: "token",
 //   streamTokenPriceUsd: 1_000_000n,
 //   aleoPriceUsd: 500_000n,
 //   priceExpiry: 1_893_456_000n,
@@ -30,13 +30,12 @@ const WHITELIST_KEY =
 describe("hashing (known on-chain vectors)", () => {
   it("hashes a TokenPrice exactly like BHP256::hash_to_field on-chain", () => {
     const message = tokenPriceMessage({
-      streamToken: "token.aleo",
+      streamToken: "token",
       streamTokenPriceUsd: 1_000_000n,
       aleoPriceUsd: 500_000n,
       priceExpiry: 1_893_456_000n,
       nonce: 5n,
     });
-    console.log("message", message);
     assert.equal(message, PRICE_HASH);
   });
 
@@ -47,7 +46,7 @@ describe("hashing (known on-chain vectors)", () => {
   });
 
   it("computes the whitelisted_token_programs mapping key like on-chain", () => {
-    assert.equal(whitelistKey("12345", "my_token.aleo"), WHITELIST_KEY);
+    assert.equal(whitelistKey("12345", "my_token"), WHITELIST_KEY);
   });
 });
 

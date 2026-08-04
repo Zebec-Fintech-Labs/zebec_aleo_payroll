@@ -11,7 +11,7 @@
  * Environment variables:
  * - AACS_TEST_PRIVATE_KEY (required): funded testnet private key.
  * - AACS_TEST_HOST (optional): API host, defaults to the testnet explorer.
- * - AACS_DEPLOY=1 (optional): deploy `aacs_payroll.aleo` first when it is
+ * - AACS_DEPLOY=1 (optional): deploy `aacs_payroll_v2.aleo` first when it is
  *   not found on the network (costs a deployment fee).
  *
  * Stream-lifecycle transactions (create/pause/withdraw/cancel) are not

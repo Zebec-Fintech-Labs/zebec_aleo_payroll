@@ -1,5 +1,5 @@
 /**
- * `PayrollClient` — high-level interface to the `aacs_payroll.aleo` program:
+ * `PayrollClient` — high-level interface to the `aacs_payroll_v2.aleo` program:
  * stream lifecycle operations, admin configuration, and mapping reads.
  */
 
@@ -41,7 +41,7 @@ import type { WithdrawableAmounts } from "./math.js";
 import type { TicketRecordName } from "./records.js";
 
 export const DEFAULT_ENDPOINT = "https://api.explorer.provable.com/v1";
-export const PROGRAM_ID = "aacs_payroll.aleo";
+export const PROGRAM_ID = "aacs_payroll_v2.aleo";
 
 export class PayrollService {
   readonly programId: string;
@@ -78,11 +78,14 @@ export class PayrollService {
   /**
    * Execute `create_stream_private`.
    *
-   * `creditRecord` / `tokenRecord` are located automatically when omitted
-   * (requires the client to be constructed with `privateKey`).
+   * `tokenProgram` is the bare identifier of the IARC22 token program (e.g.
+   * `"my_token"` — without the `.aleo` suffix), passed as the second on-chain
+   * input. `creditRecord` / `tokenRecord` are located automatically when
+   * omitted (requires the client to be constructed with `privateKey`).
    */
   async createStreamPrivate(
     params: CreateStreamParams,
+    tokenProgram: string,
     config: Config,
     tokenPrice: TokenPrice,
     priceSignature: string,
@@ -114,9 +117,10 @@ export class PayrollService {
     const tokenRecord =
       options.tokenRecord !== undefined
         ? options.tokenRecord.toString()
-        : await this.findToken(`${params.tokenProgram}.aleo`, depositAmount);
+        : await this.findToken(`${tokenProgram}.aleo`, depositAmount);
     const inputs = [
       createStreamParamsToPlaintext(params),
+      identLiteral(tokenProgram),
       configToPlaintext(config),
       tokenPriceToPlaintext(tokenPrice),
       priceSignature,

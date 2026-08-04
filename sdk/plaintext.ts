@@ -27,10 +27,10 @@ export function fieldLiteral(value: string | bigint | number): string {
   return trimmed.endsWith("field") ? trimmed : `${trimmed}field`;
 }
 
-/** Render an identifier literal using Leo's single-quote syntax. */
+/** Render a bare identifier literal (e.g. `my_token`) using Leo's single-quote syntax. */
 export function identLiteral(name: string): string {
   const trimmed = name.trim();
-  if (!/^[a-z][a-z0-9_]{0,30}\.aleo$/.test(trimmed)) {
+  if (!/^[a-z][a-z0-9_]{0,30}$/.test(trimmed)) {
     throw new Error(`invalid identifier: ${name}`);
   }
   return `'${trimmed}'`;
@@ -50,7 +50,6 @@ export function createStreamParamsToPlaintext(p: CreateStreamParams): string {
     `auto_withdrawable: ${boolLiteral(p.autoWithdrawable)}, ` +
     `withdraw_frequency: ${p.withdrawFrequency}u64, ` +
     `start_now: ${boolLiteral(p.startNow)}, can_topup: ${boolLiteral(p.canTopup)}, ` +
-    `token_program: ${identLiteral(p.tokenProgram)}, ` +
     `initial_buffer_amount: ${p.initialBufferAmount}u128 }`
   );
 }

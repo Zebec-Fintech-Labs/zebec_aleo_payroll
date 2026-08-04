@@ -1,5 +1,5 @@
 /**
- * TypeScript mirrors of the Leo structs in `aacs_payroll.aleo` (see
+ * TypeScript mirrors of the Leo structs in `aacs_payroll_v2.aleo` (see
  * `src/main.leo` at the repository root) plus SDK option types.
  *
  * Conventions used across the SDK:
@@ -62,8 +62,6 @@ export interface CreateStreamParams {
   withdrawFrequency: bigint;
   startNow: boolean;
   canTopup: boolean;
-  /** Identifier of the IARC22 token program (e.g. `"my_token_program"`). */
-  tokenProgram: string;
   initialBufferAmount: bigint;
 }
 
@@ -100,12 +98,12 @@ export interface MerkleProof {
 export interface PayrollClientOptions {
   /** API host. Defaults to the testnet explorer API. */
   host?: string;
-  /** Program id. Defaults to `aacs_payroll.aleo`. */
+  /** Program id. Defaults to `aacs_payroll_v2.aleo`. */
   programId?: string;
   /** Private key of the transacting account (`APrivateKey1...`). */
   privateKey?: string;
   /**
-   * Compiled program source (`build/aacs_payroll/aacs_payroll.aleo`). When
+   * Compiled program source (`build/aacs_payroll_v2/aacs_payroll_v2.aleo`). When
    * provided, it is used for executions instead of fetching the (deployed)
    * program from the network — useful before the program is deployed.
    */
