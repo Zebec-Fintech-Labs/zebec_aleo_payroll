@@ -15,8 +15,8 @@ import {
   parseStructMembers,
   streamAnchorToPlaintext,
   tokenPriceToPlaintext,
-} from "../../src/plaintext.js";
-import type { StreamAnchor } from "../../src/types.js";
+} from "../../plaintext.js";
+import type { StreamAnchor } from "../../types.js";
 
 const RECEIVER = "aleo1ezamst4pjgj9zfxqq0fwfj8a4cjuqndmasgata3hggzqygggnyfq6kmyd4";
 const ADMIN = "aleo129nrpl0dxh4evdsan3f4lyhz5pdgp6klrn5atp37ejlavswx5czsk0j5dj";

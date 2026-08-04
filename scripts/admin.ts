@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 import path from "node:path";
 import * as fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import { configNameToField, PayrollClient } from "../src/index.js";
+import { configNameToField, PayrollClient } from "../sdk/index.js";
 import { randomBytes } from "node:crypto";
 import { setTimeout } from "node:timers/promises";
 

@@ -9,8 +9,8 @@
     // Environment Settings
     // See also https://aka.ms/tsconfig/module
     "module": "esnext",
-    "moduleResolution": "bundler",
     "moduleDetection": "force",
+    "moduleResolution": "bundler",
     // Stricter Typechecking Options
     "noUncheckedIndexedAccess": true,
     "noUncheckedSideEffectImports": true,
@@ -21,7 +21,7 @@
     "noUnusedParameters": true,
     "outDir": "./dist",
     // File Layout
-    "rootDir": "./src",
+    "rootDir": "./sdk",
     "skipLibCheck": true,
     // For nodejs:
     // "lib": ["esnext"],
@@ -40,9 +40,11 @@
   },
   "exclude": [
     "node_modules",
-    "test"
+    "test",
+    "build",
+    "src"
   ],
   "include": [
-    "src"
+    "sdk",
   ]
 }

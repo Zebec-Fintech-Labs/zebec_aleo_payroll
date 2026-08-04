@@ -30,7 +30,7 @@ import {
   configNameToField,
   PayrollClient,
   DEFAULT_ENDPOINT,
-} from "../../src/index.js";
+} from "../../index.js";
 
 import dotenv from "dotenv";
 

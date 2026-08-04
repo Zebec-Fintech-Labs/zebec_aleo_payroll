@@ -6,7 +6,7 @@ import {
   feeTierKey,
   tokenPriceMessage,
   whitelistKey,
-} from "../../src/hashing.js";
+} from "../../hashing.js";
 
 // Known vectors produced on-chain with `leo run` (Leo 4.3.4, testnet) —
 // see the scratch program used during development. If these match, the

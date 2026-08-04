@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "mocha";
 
-import { computeStreamFee, computeWithdrawableAmount } from "../../src/math.js";
+import { computeStreamFee, computeWithdrawableAmount } from "../../math.js";
 
 describe("computeStreamFee", () => {
   it("computes usd value and fee like the on-chain function", () => {
