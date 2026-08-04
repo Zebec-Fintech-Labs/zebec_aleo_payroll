@@ -42,7 +42,8 @@ export function configNameToField(name: string): string {
   const bytes = new TextEncoder().encode(name);
   const bits: boolean[] = [];
   for (const byte of bytes) {
-    for (let i = 0; i < 8; i++) {
+    for (let i = 7; i >= 0; i--) {
+      // Shift the bit to the rightmost position and mask it
       bits.push(((byte >> i) & 1) === 1);
     }
   }

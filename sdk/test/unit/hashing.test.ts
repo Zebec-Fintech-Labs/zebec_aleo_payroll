@@ -47,5 +47,6 @@ describe("configNameToField", () => {
     assert.equal(a, configNameToField("aacs-payroll"));
     assert.match(a, /^\d+field$/);
     assert.notEqual(a, configNameToField("other-name"));
+
   });
 });

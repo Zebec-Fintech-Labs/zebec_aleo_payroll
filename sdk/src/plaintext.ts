@@ -30,7 +30,7 @@ export function fieldLiteral(value: string | bigint | number): string {
 /** Render an identifier literal using Leo's single-quote syntax. */
 export function identLiteral(name: string): string {
   const trimmed = name.trim();
-  if (!/^[A-Za-z][A-Za-z0-9_]{0,30}$/.test(trimmed)) {
+  if (!/^[A-Za-z][A-Za-z0-9_]{0,30}\.aleo$/.test(trimmed)) {
     throw new Error(`invalid identifier: ${name}`);
   }
   return `'${trimmed}'`;

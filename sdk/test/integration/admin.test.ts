@@ -24,17 +24,23 @@ import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { describe, it } from "mocha";
 
 import {
   configNameToField,
   PayrollClient,
-  PROGRAM_ID,
-  DEFAULT_TESTNET_HOST,
+  DEFAULT_ENDPOINT,
 } from "../../src/index.js";
 
+import dotenv from "dotenv";
+
+dotenv.config();
+
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
-const HOST = process.env.ENDPOINT ?? DEFAULT_TESTNET_HOST;
-const DEPLOY = process.env.AACS_DEPLOY === "1";
+if (!PRIVATE_KEY) {
+  console.warn("AACS_TEST_PRIVATE_KEY is not set; skipping integration tests.");
+}
+const HOST = process.env.ENDPOINT ?? DEFAULT_ENDPOINT;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PROGRAM_SOURCE = readFileSync(
@@ -47,7 +53,7 @@ const CONFIG_NAME = configNameToField(`aacs-itest-${randomBytes(8).toString("hex
 
 describe("testnet integration: admin lifecycle", function () {
   if (!PRIVATE_KEY) {
-    it("is skipped (set AACS_TEST_PRIVATE_KEY to run)", function () {
+    it("is skipped (set PRIVATE_KEY to run)", function () {
       this.skip();
     });
     return;
@@ -67,23 +73,6 @@ describe("testnet integration: admin lifecycle", function () {
   async function waitForConfirmation(txId: string) {
     await client.networkClient.waitForTransactionConfirmation(txId);
   }
-
-  before(async function () {
-    try {
-      await client.networkClient.getProgram(PROGRAM_ID);
-    } catch {
-      if (!DEPLOY) {
-        console.log(
-          `    ${PROGRAM_ID} not deployed on ${HOST}; ` +
-          `rerun with AACS_DEPLOY=1 to deploy it first. Skipping.`,
-        );
-        this.skip();
-      }
-      console.log(`    deploying ${PROGRAM_ID}...`);
-      const txId = await client.programManager.deploy(PROGRAM_SOURCE, 0, false);
-      await waitForConfirmation(txId);
-    }
-  });
 
   it("initializes a payroll config", async () => {
     const txId = await client.initializeConfig(CONFIG_NAME, admin, admin, 1_000n, 2_000n);

@@ -4,7 +4,7 @@
 
 export {
   PayrollService as PayrollClient,
-  DEFAULT_TESTNET_HOST,
+  DEFAULT_ENDPOINT,
   PROGRAM_ID,
 } from "./client.js";
 

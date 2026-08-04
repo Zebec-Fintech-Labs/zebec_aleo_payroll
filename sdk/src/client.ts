@@ -40,7 +40,7 @@ import type {
 import type { WithdrawableAmounts } from "./math.js";
 import type { TicketRecordName } from "./records.js";
 
-export const DEFAULT_TESTNET_HOST = "https://api.explorer.provable.com/v1";
+export const DEFAULT_ENDPOINT = "https://api.explorer.provable.com/v1";
 export const PROGRAM_ID = "aacs_payroll.aleo";
 
 export class PayrollService {
@@ -54,7 +54,7 @@ export class PayrollService {
   private readonly programImports?: Record<string, string>;
 
   constructor(options: PayrollServiceOptions = {}) {
-    const host = options.host ?? DEFAULT_TESTNET_HOST;
+    const host = options.host ?? DEFAULT_ENDPOINT;
     this.programId = options.programId ?? PROGRAM_ID;
     this.networkClient = new AleoNetworkClient(host);
     this.programManager = new ProgramManager(host);
@@ -274,6 +274,9 @@ export class PayrollService {
       "fee_tiers",
       feeTierKey(configName, index),
     );
+    if (!value) {
+      throw new Error(`fee tier not found for config ${configName} at index ${index}`);
+    }
     return parseFeeTier(value);
   }
 
