@@ -2,15 +2,15 @@ import assert from "node:assert";
 import { Account } from "@provablehq/sdk";
 import { describe, it } from "mocha";
 
-import { signTokenPrice, verifyTokenPriceSignature } from "../../signing.js";
-import type { TokenPrice } from "../../types.js";
+import { signTokenPrice, verifyTokenPriceSignature } from "../../sdk/signing.js";
+import type { TokenPrice } from "../../sdk/types.js";
 
 // Well-known Leo CLI default private key (public, used for tests only).
 const TEST_PRIVATE_KEY =
   "APrivateKey1zkp8CZNn3yeCseEtxuVPbDCwSyhGW6yZKUYKfgXmcpoGPWH";
 
 const tokenPrice: TokenPrice = {
-  streamToken: "token",
+  streamToken: "token.aleo",
   streamTokenPriceUsd: 1_000_000n,
   aleoPriceUsd: 500_000n,
   priceExpiry: 1_893_456_000n,

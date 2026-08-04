@@ -30,7 +30,7 @@ import {
   configNameToField,
   PayrollClient,
   DEFAULT_ENDPOINT,
-} from "../../index.js";
+} from "../../sdk/index.js";
 
 import dotenv from "dotenv";
 
@@ -43,8 +43,9 @@ if (!PRIVATE_KEY) {
 const HOST = process.env.ENDPOINT ?? DEFAULT_ENDPOINT;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+
 const PROGRAM_SOURCE = readFileSync(
-  path.resolve(here, "../../../../build/aacs_payroll/aacs_payroll.aleo"),
+  path.resolve(here, "../../build/aacs_payroll_v2/aacs_payroll_v2.aleo"),
   "utf8",
 );
 

@@ -15,8 +15,8 @@ import {
   parseStructMembers,
   streamAnchorToPlaintext,
   tokenPriceToPlaintext,
-} from "../../plaintext.js";
-import type { StreamAnchor } from "../../types.js";
+} from "../../sdk/plaintext.js";
+import type { StreamAnchor } from "../../sdk/types.js";
 
 const RECEIVER = "aleo1ezamst4pjgj9zfxqq0fwfj8a4cjuqndmasgata3hggzqygggnyfq6kmyd4";
 const ADMIN = "aleo129nrpl0dxh4evdsan3f4lyhz5pdgp6klrn5atp37ejlavswx5czsk0j5dj";
@@ -32,8 +32,8 @@ describe("fieldLiteral", () => {
 
 describe("identLiteral", () => {
   it("wraps valid identifiers in single quotes", () => {
-    assert.equal(identLiteral("my_token"), "'my_token'");
-    assert.equal(identLiteral("X"), "'X'");
+    assert.equal(identLiteral("my_token.aleo"), "'my_token.aleo'");
+    assert.equal(identLiteral("x.aleo"), "'x.aleo'");
   });
   it("rejects invalid identifiers", () => {
     assert.throws(() => identLiteral("1foo"));
@@ -56,7 +56,7 @@ describe("struct serializers", () => {
       withdrawFrequency: 60n,
       startNow: true,
       canTopup: false,
-      tokenProgram: "my_token",
+      tokenProgram: "my_token.aleo",
       initialBufferAmount: 0n,
     });
     assert.equal(
@@ -64,7 +64,7 @@ describe("struct serializers", () => {
       `{ receiver: ${RECEIVER}, stream_id: 42field, amount: 1000000u128, ` +
       `start_time: 1800000000i64, duration: 3600u64, is_cancelable: true, ` +
       `is_pausable: false, auto_withdrawable: true, withdraw_frequency: 60u64, ` +
-      `start_now: true, can_topup: false, token_program: 'my_token', ` +
+      `start_now: true, can_topup: false, token_program: 'my_token.aleo', ` +
       `initial_buffer_amount: 0u128 }`,
     );
     // Must parse with the real snarkVM plaintext parser.
@@ -83,7 +83,7 @@ describe("struct serializers", () => {
     Plaintext.fromString(config).free();
 
     const price = tokenPriceToPlaintext({
-      streamToken: "token",
+      streamToken: "token.aleo",
       streamTokenPriceUsd: 1_000_000n,
       aleoPriceUsd: 500_000n,
       priceExpiry: 1_893_456_000n,

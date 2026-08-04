@@ -67,7 +67,6 @@ struct CreateStreamParams {
     withdraw_frequency: u64,
     start_now: bool,
     can_topup: bool,
-    token_program: identifier,
     // Token amount for the initial pre-paid buffer window.
     // When can_topup is true, then the initial_buffer_amount 
     // is take as buffer amount
@@ -156,6 +155,7 @@ program aacs_payroll_v2.aleo {
 
     fn create_stream_private(
         params: CreateStreamParams,
+        public token_program: identifier,
         config: Config,
         token_price: TokenPrice,
         price_signature: signature,
@@ -201,7 +201,7 @@ program aacs_payroll_v2.aleo {
             credits.aleo::transfer_private_to_public(change2, config.fee_vault, stream_fee);
         
         let (comp, change, f_deposit_amount_transfer): (dyn record, dyn record, Final) =
-            iarc22::IARC22@(params.token_program)::transfer_private_to_public(
+            iarc22::IARC22@(token_program)::transfer_private_to_public(
                 self.address, deposit_amount, token_input_record, sender_merkle_proofs
             );
 
@@ -209,7 +209,7 @@ program aacs_payroll_v2.aleo {
             owner: signer,
             stream_id: params.stream_id,
             receiver: params.receiver,
-            token_program: params.token_program,
+            token_program: token_program,
             full_amount: params.amount,
             is_cancelable: params.is_cancelable,
             is_pausable: params.is_pausable,
@@ -220,7 +220,7 @@ program aacs_payroll_v2.aleo {
         let receiver_ticket = ReceiverPayrollTicket {
             owner: params.receiver,
             sender: signer,
-            token_program: params.token_program,
+            token_program: token_program,
             full_amount: params.amount,
             stream_id: params.stream_id,
         };
@@ -231,7 +231,7 @@ program aacs_payroll_v2.aleo {
             stream_id: params.stream_id,
             sender: signer,
             receiver: params.receiver,
-            token_program: params.token_program,
+            token_program: token_program,
         };
 
         return final {
@@ -270,7 +270,7 @@ program aacs_payroll_v2.aleo {
 
             // Checks: token whitelist (scoped to this config)
             let whitelist_key: field = BHP256::hash_to_field(
-                WhitelistKey { config: config.config_name, token_program: params.token_program },
+                WhitelistKey { config: config.config_name, token_program: token_program },
             );
             let allowed = whitelisted_token_programs.get_or_use(whitelist_key, false);
             assert(allowed);
@@ -635,12 +635,12 @@ program aacs_payroll_v2.aleo {
     // Config admin only.
     fn set_token_whitelisted(
         config_name: field,
-        public token: identifier,
+        public token_program: identifier,
         allowed: bool,
     ) -> Final {
         let caller: address = std::ctx::caller();
         let whitelist_key: field = BHP256::hash_to_field(
-            WhitelistKey { config: config_name, token_program: token },
+            WhitelistKey { config: config_name, token_program: token_program },
         );
 
         return final {
@@ -664,9 +664,9 @@ program aacs_payroll_v2.aleo {
         return fee_tiers.get(tier_key);
     }
 
-    view fn is_token_whitelisted(config_name: field, token: identifier) -> bool {
+    view fn is_token_whitelisted(config_name: field, token_program: identifier) -> bool {
         let whitelist_key: field = BHP256::hash_to_field(
-            WhitelistKey { config: config_name, token_program: token },
+            WhitelistKey { config: config_name, token_program: token_program },
         );
         return whitelisted_token_programs.get_or_use(whitelist_key, false);
     }

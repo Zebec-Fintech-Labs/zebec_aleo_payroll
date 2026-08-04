@@ -1,39 +1,39 @@
 {
-  "name": "aacs-payroll-sdk",
-  "version": "1.0.0",
-  "description": "TypeScript SDK for the aacs_payroll.aleo program",
-  "license": "MIT",
   "author": "Ashish Sapkota",
-  "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
-  },
-  "files": [
-    "dist"
-  ],
-  "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "test": "tsc -p tsconfig.test.json && mocha \".test-dist/test/unit/**/*.test.js\"",
-    "test:integration": "tsc -p tsconfig.test.json && mocha --timeout 600000 \".test-dist/test/integration/**/*.test.js\"",
-    "clean": "rm -rf dist .test-dist"
-  },
   "dependencies": {
     "@provablehq/sdk": "^0.11.6",
     "bignumber.js": "^11.1.5"
   },
+  "description": "TypeScript SDK for the aacs_payroll.aleo program",
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "^26.1.2",
     "dotenv": "^17.4.2",
     "mocha": "^11.7.6",
-    "ts-mocha": "^11.1.0",
-    "ts-node": "^10.9.2",
     "tsx": "^4.23.5",
     "typescript": "^7.0.2"
-  }
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "license": "MIT",
+  "main": "dist/index.js",
+  "name": "aacs-payroll-sdk",
+  "scripts": {
+    "build": "leo build",
+    "clean": "leo clean",
+    "sdk:build": "npm run sdk:clean && tsc -p tsconfig.json",
+    "sdk:clean": "rm -rf dist .test-dist",
+    "sdk:test:integration": "ts-mocha -p tsconfig.test.json --timeout 600000 '.test-dist/sdk-tests/integration/**/*.test.js'",
+    "sdk:test:unit": "tsc -p tsconfig.test.json && mocha '.test-dist/sdk-tests/unit/**/*.test.js'"
+  },
+  "type": "module",
+  "types": "dist/index.d.ts",
+  "version": "1.0.0"
 }

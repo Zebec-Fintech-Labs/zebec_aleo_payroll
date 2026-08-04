@@ -1,13 +1,29 @@
 {
+  "compilerOptions": {
+    "declaration": true,
+    "esModuleInterop": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": ".test-dist",
+    "rootDir": ".",
+    "strict": true,
+    "target": "ES2022",
+    "types": [
+      "mocha",
+      "node"
+    ]
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "build",
+    "src"
+  ],
   // Test build: compiles src + test into .test-dist as plain ESM JavaScript,
   // which mocha then runs directly (no ts-node/ts-mocha needed).
   "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "rootDir": ".",
-    "outDir": "./.test-dist",
-    "declaration": false,
-    "sourceMap": true
-  },
-  "exclude": ["node_modules", "dist"],
-  "include": ["src", "test"]
+  "include": [
+    "sdk",
+    "sdk-tests"
+  ]
 }
