@@ -107,7 +107,7 @@ const BPS_DENOMINATOR: u64 = 10_000u64;
 const MAX_FEE_TIERS: u8 = 8u8;
 
 // The 'aacs_payroll' program.
-program aacs_payroll.aleo {
+program aacs_payroll_v2.aleo {
     // Payroll configurations, keyed by unique config name (a BHP256 hash of
     // the off-chain name).
     mapping payroll_config: field => PayrollConfig;
@@ -635,7 +635,7 @@ program aacs_payroll.aleo {
     // Config admin only.
     fn set_token_whitelisted(
         config_name: field,
-        token: identifier,
+        public token: identifier,
         allowed: bool,
     ) -> Final {
         let caller: address = std::ctx::caller();

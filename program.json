@@ -1,22 +1,22 @@
 {
-  "program": "aacs_payroll.aleo",
-  "version": "0.1.0",
-  "description": "",
-  "license": "MIT",
-  "leo": "4.3.4",
   "dependencies": [
     {
-      "name": "iarc22",
+      "edition": null,
       "location": "local",
-      "path": "iarc22",
-      "edition": null
+      "name": "iarc22",
+      "path": "iarc22"
     },
     {
-      "name": "credits.aleo",
+      "edition": null,
       "location": "network",
-      "path": null,
-      "edition": null
+      "name": "credits.aleo",
+      "path": null
     }
   ],
-  "dev_dependencies": null
+  "description": "",
+  "dev_dependencies": null,
+  "leo": "4.3.4",
+  "license": "MIT",
+  "program": "aacs_payroll_v2.aleo",
+  "version": "0.1.0"
 }
