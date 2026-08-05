@@ -22,7 +22,7 @@ const HOST = "https://api.explorer.provable.com/v1";
 const here = path.dirname(fileURLToPath(import.meta.url));
 console.log("Current directory:", here);
 const PROGRAM_SOURCE = fs.readFileSync(
-    path.resolve(here, "../../build/aacs_payroll/aacs_payroll.aleo"),
+    path.resolve(here, "../build/aacs_payroll_v2/aacs_payroll_v2.aleo"),
     "utf8",
 );
 
@@ -87,15 +87,16 @@ async function setFeeTiers() {
         });
         console.log(`Fee tier ${index} transaction ID:`, txId);
         await waitForConfirmation(txId);
-        await setTimeout(2000);
-        console.log(`Set fee tier ${index}:`, tier);
+    }
+
+    for (let index = 0; index < TIERS.length; index++) {
         const retrievedTier = await client.getFeeTier(CONFIG_NAME, index);
         console.log(`Retrieved fee tier ${index}:`, retrievedTier);
     }
 }
 
 async function whitelistTokens() {
-    const TOKENS = ["test_usdcx_stablecoin.aleo", "test_usad_stablecoin.aleo"];
+    const TOKENS = ["test_usdcx_stablecoin", "test_usad_stablecoin"];
     const ALLOWED = true;
 
     for (const token of TOKENS) {
@@ -113,7 +114,7 @@ async function whitelistTokens() {
 async function main() {
     // await initializePayrollConfig();
     // await updatePayrollConfig();
-    // await setFeeTiers();
+    await setFeeTiers();
     await whitelistTokens();
 }
 

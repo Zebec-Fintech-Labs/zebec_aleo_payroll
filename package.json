@@ -28,6 +28,10 @@
   "scripts": {
     "build": "leo build",
     "clean": "leo clean",
+    "run:admin": "tsx scripts/admin.ts",
+    "run:deploy": "tsx scripts/deploy.ts",
+    "run:payroll": "tsx scripts/payroll.ts",
+    "run:upgrade": "tsx scripts/upgrade.ts",
     "sdk:build": "npm run sdk:clean && tsc -p tsconfig.json",
     "sdk:clean": "rm -rf dist .test-dist",
     "sdk:test:integration": "ts-mocha -p tsconfig.test.json --timeout 600000 '.test-dist/sdk-tests/integration/**/*.test.js'",

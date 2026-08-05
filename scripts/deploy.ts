@@ -19,7 +19,7 @@ const HOST = "https://api.explorer.provable.com/v1";
 const here = path.dirname(fileURLToPath(import.meta.url));
 console.log("Current directory:", here);
 const PROGRAM_SOURCE = fs.readFileSync(
-    path.resolve(here, "../../build/aacs_payroll/aacs_payroll.aleo"),
+    path.resolve(here, "../build/aacs_payroll_v2/aacs_payroll_v2.aleo"),
     "utf8",
 );
 // console.log("Program source loaded:\n", PROGRAM_SOURCE, "\n");
@@ -38,7 +38,7 @@ programManager.setAccount(account);
 // const imports = await networkClient.getProgramImports(PROGRAM_SOURCE);
 // console.log("Program imports:", imports);
 // Define a fee to pay to deploy the program
-const fee = 3.8;
+const fee = 1;
 // Build a deployment transaction for the program.
 const tx = await programManager.buildDeploymentTransaction(PROGRAM_SOURCE, fee, false);
 console.log("Transaction ID:", tx.id());
