@@ -152,10 +152,10 @@ program aacs_payroll_v2.aleo {
         receiver: address,
         token_program: identifier,
     }
-
+    
     fn create_stream_private(
         params: CreateStreamParams,
-        public token_program: identifier,
+        token_program: identifier,
         config: Config,
         token_price: TokenPrice,
         price_signature: signature,
@@ -635,7 +635,7 @@ program aacs_payroll_v2.aleo {
     // Config admin only.
     fn set_token_whitelisted(
         config_name: field,
-        public token_program: identifier,
+        token_program: identifier,
         allowed: bool,
     ) -> Final {
         let caller: address = std::ctx::caller();
