@@ -172,7 +172,7 @@ program aacs_payroll_v2.aleo {
         let deposit_amount: u128 = params.can_topup ? params.initial_buffer_amount: params.amount;
         assert(deposit_amount > 0u128);
         let token_input_record_amount: u128 = token_input_record.amount as u128;
-        assert(deposit_amount >= token_input_record_amount);
+        assert(token_input_record_amount >= deposit_amount);
 
         let (usd_value, stream_fee) = compute_stream_fee(
             params.amount, 
@@ -189,7 +189,7 @@ program aacs_payroll_v2.aleo {
             auto_withdrawal_fee = config.platform_fee + transaction_fee;
         }
 
-        assert(auto_withdrawal_fee + stream_fee >= credit_input_record.microcredits);
+        assert(credit_input_record.microcredits >= auto_withdrawal_fee + stream_fee);
 
         let (change1, change2): (credits.aleo::credits, credits.aleo::credits) = 
             credits.aleo::split(credit_input_record, auto_withdrawal_fee);
