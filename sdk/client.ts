@@ -114,10 +114,13 @@ export class PayrollService {
       options.creditRecord !== undefined
         ? options.creditRecord.toString()
         : await this.findCredits(autoWithdrawalFee + streamFee);
+    console.debug(`Found credit record ${creditRecord} covering auto-withdrawal fee ${autoWithdrawalFee} and stream fee ${streamFee}`,
+    );
     const tokenRecord =
       options.tokenRecord !== undefined
         ? options.tokenRecord.toString()
         : await this.findToken(`${tokenProgram}.aleo`, depositAmount);
+    console.debug(`Found token record ${tokenRecord} covering deposit amount ${depositAmount}`,);
     const inputs = [
       createStreamParamsToPlaintext(params),
       identLiteral(tokenProgram),

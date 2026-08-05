@@ -248,16 +248,36 @@ async function cancelStream(streamId: string | bigint) {
 }
 
 async function main() {
+    let start = Date.now();
     const streamId = await createStream();
-    console.log("Stream created with ID:", streamId);
-    await setTimeout(10_000);
-    await pauseStream(streamId);
+    let end = Date.now();
+    console.log(`Stream creation took ${(end - start) / 1000} seconds`);
     await setTimeout(5_000);
+    console.log("Pausing stream...");
+    start = Date.now();
+    await pauseStream(streamId);
+    end = Date.now();
+    console.log(`Stream pause took ${(end - start) / 1000} seconds`);
+    await setTimeout(5_000);
+    console.log("Resuming stream...");
+    start = Date.now();
     await resumeStream(streamId);
-    await setTimeout(2_000);
+    end = Date.now();
+    console.log(`Stream resume took ${(end - start) / 1000} seconds`);
+    await setTimeout(5_000);
+    console.log("Withdrawing from stream...");
+    start = Date.now();
     await withdraw(streamId);
-    await setTimeout(2_000);
+    end = Date.now();
+    console.log(`Stream withdraw took ${(end - start) / 1000} seconds`);
+    await setTimeout(5_000);
+    console.log("Canceling stream...");
+    start = Date.now();
     await cancelStream(streamId);
+    end = Date.now();
+    console.log(`Stream cancel took ${(end - start) / 1000} seconds`);
+    console.log("Payroll stream lifecycle completed successfully.");
+    console.log("Stream created with ID:", streamId);
 }
 
 await main().catch((error) => {

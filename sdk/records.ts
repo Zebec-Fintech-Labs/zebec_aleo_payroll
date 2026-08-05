@@ -8,20 +8,88 @@ import type { AleoNetworkClient, RecordPlaintext } from "@provablehq/sdk";
 
 const CREDITS_PROGRAM = "credits.aleo";
 
-async function findRecords(
+/**
+ * `AleoNetworkClient.findUnspentRecords` walks the chain backwards in
+ * 50-block HTTP requests. On a failed request it retries the same chunk up
+ * to 10 times *without any delay* and then silently returns the records
+ * collected so far, and the explorer API regularly answers with transient
+ * 5xx errors or 429 rate limits. The scan is therefore driven here in
+ * small windows that are retried with backoff and paced, and it stops as
+ * soon as a matching record is found.
+ */
+const SCAN_WINDOW_BLOCKS = 500;
+const SCAN_MAX_ATTEMPTS = 5;
+const SCAN_BASE_DELAY_MS = 1_000;
+const SCAN_WINDOW_DELAY_MS = 250;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Retry `fn` with exponential backoff against transient explorer errors. */
+async function withRetries<T>(fn: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= SCAN_MAX_ATTEMPTS; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (attempt < SCAN_MAX_ATTEMPTS) {
+        const backoff = SCAN_BASE_DELAY_MS * 2 ** (attempt - 1);
+        await sleep(backoff + Math.floor(Math.random() * backoff));
+      }
+    }
+  }
+  throw lastError;
+}
+
+export interface RecordScanOptions {
+  /**
+   * Do not scan below this block height (defaults to 0, i.e. full history).
+   * Set it (e.g. to `latestHeight - 100_000`) only when every record of
+   * interest is known to be younger than that bound.
+   */
+  minHeight?: number;
+}
+
+/**
+ * Scan the chain backwards from the latest block, window by window, and
+ * return the first (i.e. newest) unspent record of `programs` owned by the
+ * account behind `privateKey` that satisfies `match`. Returns `undefined`
+ * when the whole range down to `options.minHeight` was scanned without a
+ * match.
+ */
+async function scanForRecord(
   networkClient: AleoNetworkClient,
   privateKey: string,
   programs: string[],
-): Promise<RecordPlaintext[]> {
-  return networkClient.findUnspentRecords(
-    0,
-    undefined,
-    programs,
-    undefined,
-    undefined,
-    undefined,
-    privateKey,
-  );
+  match: (record: RecordPlaintext) => boolean,
+  options: RecordScanOptions = {},
+): Promise<RecordPlaintext | undefined> {
+  const floor = options.minHeight ?? 0;
+  let end = await withRetries(() => networkClient.getLatestHeight());
+  // Nonces of records already collected, so retried windows skip them.
+  const nonces: string[] = [];
+  while (end > floor) {
+    const start = Math.max(floor, end - SCAN_WINDOW_BLOCKS);
+    const records = await withRetries(() =>
+      networkClient.findUnspentRecords(
+        start,
+        end,
+        programs,
+        undefined,
+        undefined,
+        nonces,
+        privateKey,
+      ),
+    );
+    for (const record of records) {
+      nonces.push(record.nonce());
+      if (match(record)) return record;
+    }
+    end = start;
+    // Pace the windows: the public explorer rate-limits aggressive scans.
+    if (end > floor) await sleep(SCAN_WINDOW_DELAY_MS);
+  }
+  return undefined;
 }
 
 function recordAmount(record: RecordPlaintext, member: string): bigint | undefined {
@@ -38,17 +106,24 @@ export async function findCreditsRecord(
   networkClient: AleoNetworkClient,
   privateKey: string,
   minMicrocredits: bigint,
+  options: RecordScanOptions = {},
 ): Promise<RecordPlaintext> {
-  const records = await findRecords(networkClient, privateKey, [CREDITS_PROGRAM]);
-  for (const record of records) {
-    const microcredits = recordAmount(record, "microcredits");
-    if (microcredits !== undefined && microcredits >= minMicrocredits) {
-      return record;
-    }
-  }
-  throw new Error(
-    `no unspent credits.aleo record with at least ${minMicrocredits} microcredits`,
+  const record = await scanForRecord(
+    networkClient,
+    privateKey,
+    [CREDITS_PROGRAM],
+    (candidate) => {
+      const microcredits = recordAmount(candidate, "microcredits");
+      return microcredits !== undefined && microcredits >= minMicrocredits;
+    },
+    options,
   );
+  if (record === undefined) {
+    throw new Error(
+      `no unspent credits.aleo record with at least ${minMicrocredits} microcredits`,
+    );
+  }
+  return record;
 }
 
 /**
@@ -61,18 +136,25 @@ export async function findTokenRecord(
   privateKey: string,
   tokenProgramId: string,
   minAmount: bigint,
+  options: RecordScanOptions = {},
 ): Promise<RecordPlaintext> {
-  const records = await findRecords(networkClient, privateKey, [tokenProgramId]);
-  for (const record of records) {
-    if (!record.toString().includes("owner:")) continue;
-    const amount = recordAmount(record, "amount");
-    if (amount !== undefined && amount >= minAmount) {
-      return record;
-    }
-  }
-  throw new Error(
-    `no unspent token record in ${tokenProgramId} with at least ${minAmount}`,
+  const record = await scanForRecord(
+    networkClient,
+    privateKey,
+    [tokenProgramId],
+    (candidate) => {
+      if (!candidate.toString().includes("owner:")) return false;
+      const amount = recordAmount(candidate, "amount");
+      return amount !== undefined && amount >= minAmount;
+    },
+    options,
   );
+  if (record === undefined) {
+    throw new Error(
+      `no unspent token record in ${tokenProgramId} with at least ${minAmount}`,
+    );
+  }
+  return record;
 }
 
 export type TicketRecordName =
@@ -110,15 +192,24 @@ export async function findTicketRecord(
   programId: string,
   recordName: TicketRecordName,
   streamId: string | bigint,
+  options: RecordScanOptions = {},
 ): Promise<RecordPlaintext> {
-  const records = await findRecords(networkClient, privateKey, [programId]);
   const idDigits = streamId.toString().replace(/field$/, "");
-  for (const record of records) {
-    const text = record.toString();
-    if (!matchesTicket(text, recordName)) continue;
-    if (new RegExp(`stream_id:\\s*${idDigits}field`).test(text)) {
-      return record;
-    }
+  const record = await scanForRecord(
+    networkClient,
+    privateKey,
+    [programId],
+    (candidate) => {
+      const text = candidate.toString();
+      return (
+        matchesTicket(text, recordName) &&
+        new RegExp(`stream_id:\\s*${idDigits}field`).test(text)
+      );
+    },
+    options,
+  );
+  if (record === undefined) {
+    throw new Error(`no ${recordName} record found for stream ${idDigits}`);
   }
-  throw new Error(`no ${recordName} record found for stream ${idDigits}`);
+  return record;
 }
