@@ -1,0 +1,29 @@
+{
+  "name": "aacs-payroll-app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@provablehq/aleo-types": "^1.0.1",
+    "@provablehq/aleo-wallet-adaptor-core": "^1.0.1",
+    "@provablehq/aleo-wallet-adaptor-react": "^1.0.1",
+    "@provablehq/aleo-wallet-adaptor-react-ui": "^1.0.1",
+    "@provablehq/aleo-wallet-adaptor-shield": "^1.0.1",
+    "@provablehq/aleo-wallet-standard": "^1.1.0",
+    "@provablehq/sdk": "^0.11.6",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  }
+}

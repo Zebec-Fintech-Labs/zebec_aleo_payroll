@@ -573,3 +573,27 @@ Public security references for the Aleo stack include Trail of Bits audits of sn
 | Proof generation failure | Low | Medium | Use delegated proving; test with realistic inputs |
 
 <!-- END: Zebec Payroll Docs -->
+<!-- BEGIN: Browser app -->
+## 7. Browser app (`app/`)
+
+`app/` is a React + Vite browser app that replaces the private-key CLI flows
+(`scripts/`) with wallet-based execution via the Shield wallet and the
+`@provablehq/aleo-wallet-adaptor-*` packages. See `app/README.md` for details.
+
+- Commands: `cd app && yarn install`, `yarn dev`, `yarn build` (`tsc && vite
+  build`), `yarn preview`.
+- Architecture: `app/src/payroll/WalletPayrollService.ts` is the wallet-backed
+  counterpart of `sdk/client.ts`'s `PayrollService` — transactions go through
+  the wallet's `executeTransaction` / `executeDeployment` (never
+  ProgramManager), mapping reads through `AleoNetworkClient`. It imports the
+  SDK's pure modules (`sdk/plaintext.ts`, `sdk/hashing.ts`, `sdk/math.ts`,
+  `sdk/signing.ts`, `sdk/types.ts`) by relative path; it must NOT import
+  `sdk/client.ts` or `sdk/records.ts`.
+- Records-via-wallet pattern: `requestRecords(program, false)` → keep
+  `spent === false` → `wallet.decrypt(recordCiphertext)` → single-line
+  plaintext → pick highest `microcredits:`/`amount:` record covering the
+  needed amount; payroll tickets are matched structurally (ported
+  `matchesTicket` logic).
+- The only private key in the app is the admin attestation key input on the
+  Employer page, used solely for `signTokenPrice` (never persisted).
+<!-- END: Browser app -->
