@@ -52,6 +52,7 @@ export class PayrollService {
   private readonly privateKey?: string;
   private readonly programSource?: string;
   private readonly programImports?: Record<string, string>;
+  private readonly programSourceCache = new Map<string, string>();
 
   constructor(options: PayrollServiceOptions = {}) {
     const host = options.host ?? DEFAULT_ENDPOINT;
@@ -121,6 +122,7 @@ export class PayrollService {
         ? options.tokenRecord.toString()
         : await this.findToken(`${tokenProgram}.aleo`, depositAmount);
     console.debug(`Found token record ${tokenRecord} covering deposit amount ${depositAmount}`,);
+    const tokenProgramId = `${tokenProgram}.aleo`;
     const inputs = [
       createStreamParamsToPlaintext(params),
       identLiteral(tokenProgram),
@@ -132,7 +134,9 @@ export class PayrollService {
       tokenRecord,
       merkleProofsToPlaintext(merkleProofs),
     ];
-    return this.execute("create_stream_private", inputs, options);
+    return this.execute("create_stream_private", inputs, options, {
+      [tokenProgramId]: await this.loadProgramSource(tokenProgramId),
+    });
   }
 
   /**
@@ -161,7 +165,7 @@ export class PayrollService {
     const ticketRecord = ticket?.toString() ?? (await this.findTicket("SenderPayrollTicket", streamId));
     const anchor = await this.getStreamAnchor(streamId);
     const inputs = [ticketRecord, streamAnchorToPlaintext(anchor), `${now}i64`];
-    return this.execute("cancel_private", inputs, options);
+    return this.execute("cancel_private", inputs, options, await this.ticketTokenImport(ticketRecord));
   }
 
   /**
@@ -177,7 +181,7 @@ export class PayrollService {
     const ticketRecord = ticket?.toString() ?? (await this.findTicket("ReceiverPayrollTicket", streamId));
     const anchor = await this.getStreamAnchor(streamId);
     const inputs = [ticketRecord, streamAnchorToPlaintext(anchor), `${now}i64`];
-    return this.execute("withdraw_private", inputs, options);
+    return this.execute("withdraw_private", inputs, options, await this.ticketTokenImport(ticketRecord));
   }
 
   // =======================================================================
@@ -376,10 +380,15 @@ export class PayrollService {
     functionName: string,
     inputs: string[],
     options: ExecuteOptions,
+    extraImports?: Record<string, string>,
   ): Promise<string> {
     if (this.account === undefined) {
       throw new Error("PayrollClient was constructed without a privateKey");
     }
+    // Dynamic call targets (e.g. the IARC22 token program) are not static
+    // imports of the payroll program, so their sources must be supplied
+    // explicitly for the snarkVM process to contain their stacks.
+    const imports = { ...this.programImports, ...extraImports };
     return this.programManager.execute({
       programName: this.programId,
       functionName,
@@ -387,9 +396,39 @@ export class PayrollService {
       privateFee: options.privateFee ?? false,
       inputs,
       ...(this.programSource !== undefined ? { program: this.programSource } : {}),
-      ...(this.programImports !== undefined ? { imports: this.programImports } : {}),
+      ...(Object.keys(imports).length > 0 ? { imports } : {}),
       ...(options.feeRecord !== undefined ? { feeRecord: options.feeRecord } : {}),
     });
+  }
+
+  /**
+   * Load the source of a deployed program, preferring caller-provided
+   * `programImports` and caching network fetches. Needed for programs that
+   * are only reached through dynamic calls (the IARC22 token program).
+   */
+  private async loadProgramSource(programId: string): Promise<string> {
+    const provided = this.programImports?.[programId];
+    if (provided !== undefined) return provided;
+    const cached = this.programSourceCache.get(programId);
+    if (cached !== undefined) return cached;
+    const source = await this.networkClient.getProgram(programId);
+    this.programSourceCache.set(programId, source);
+    return source;
+  }
+
+  /**
+   * Extract the `token_program` identifier from a payroll ticket record
+   * plaintext and load the source of the corresponding token program, as
+   * required for the dynamic token calls of `withdraw_private` and
+   * `cancel_private`.
+   */
+  private async ticketTokenImport(ticketRecord: string): Promise<Record<string, string>> {
+    const match = /token_program:\s*([a-zA-Z0-9_]+)/.exec(ticketRecord);
+    if (match === null) {
+      throw new Error("could not parse token_program from ticket record");
+    }
+    const programId = `${match[1]}.aleo`;
+    return { [programId]: await this.loadProgramSource(programId) };
   }
 
   private requirePrivateKey(): string {

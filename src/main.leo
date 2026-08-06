@@ -182,10 +182,13 @@ program aacs_payroll_v2.aleo {
         );
 
         let auto_withdrawal_fee: u64 = 0u64;
+        // Leo flattens `if` branches: the division below executes even when
+        // auto-withdrawal is disabled, so the divisor must be guarded.
+        let safe_withdraw_frequency: u64 = params.withdraw_frequency > 0u64 ? params.withdraw_frequency : 1u64;
         if (params.auto_withdrawable) {
             assert(params.withdraw_frequency > 0u64);
 
-            let transaction_fee = (params.duration / params.withdraw_frequency) * config.base_fee;
+            let transaction_fee = (params.duration / safe_withdraw_frequency) * config.base_fee;
             auto_withdrawal_fee = config.platform_fee + transaction_fee;
         }
 

@@ -10,27 +10,36 @@ const CREDITS_PROGRAM = "credits.aleo";
 
 /**
  * `AleoNetworkClient.findUnspentRecords` walks the chain backwards in
- * 50-block HTTP requests. On a failed request it retries the same chunk up
- * to 10 times *without any delay* and then silently returns the records
- * collected so far, and the explorer API regularly answers with transient
- * 5xx errors or 429 rate limits. The scan is therefore driven here in
- * small windows that are retried with backoff and paced, and it stops as
- * soon as a matching record is found.
+ * 50-block HTTP requests, firing them as fast as the network answers. The
+ * public explorer API rate-limits that pattern (HTTP 429) and also returns
+ * transient 5xx errors; the SDK's own retries fire instantly, which makes
+ * the limiting worse. The scan below therefore wraps the client's HTTP
+ * methods with a gate that paces requests and retries failures with
+ * exponential backoff, and it stops as soon as a matching record is found.
  */
 const SCAN_WINDOW_BLOCKS = 500;
-const SCAN_MAX_ATTEMPTS = 5;
-const SCAN_BASE_DELAY_MS = 1_000;
-const SCAN_WINDOW_DELAY_MS = 250;
+const SCAN_MAX_ATTEMPTS = 6;
+const SCAN_BASE_DELAY_MS = 2_000;
+const REQUEST_INTERVAL_MS = 250;
+const HEIGHT_CACHE_MS = 60_000;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Retry `fn` with exponential backoff against transient explorer errors. */
-async function withRetries<T>(fn: () => Promise<T>): Promise<T> {
+// Shared gate so concurrent scans stay below the explorer's rate limit.
+let lastRequestAt = 0;
+
+/** Run `fn` paced to `REQUEST_INTERVAL_MS`, retrying failures with backoff. */
+async function throttled<T>(fn: () => Promise<T>): Promise<T> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= SCAN_MAX_ATTEMPTS; attempt++) {
+    const wait = Math.max(0, lastRequestAt + REQUEST_INTERVAL_MS - Date.now());
+    if (wait > 0) await sleep(wait);
     try {
-      return await fn();
+      const result = await fn();
+      lastRequestAt = Date.now();
+      return result;
     } catch (error) {
+      lastRequestAt = Date.now();
       lastError = error;
       if (attempt < SCAN_MAX_ATTEMPTS) {
         const backoff = SCAN_BASE_DELAY_MS * 2 ** (attempt - 1);
@@ -39,6 +48,42 @@ async function withRetries<T>(fn: () => Promise<T>): Promise<T> {
     }
   }
   throw lastError;
+}
+
+/**
+ * Replace the client's raw HTTP methods with paced, retrying versions for
+ * the duration of `fn`. `getLatestHeight` is additionally cached because
+ * `findUnspentRecords` re-fetches it on every call. Methods are restored
+ * before returning, even on error.
+ */
+async function withPacedClient<T>(
+  networkClient: AleoNetworkClient,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const getBlockRange = networkClient.getBlockRange.bind(networkClient);
+  const getLatestHeight = networkClient.getLatestHeight.bind(networkClient);
+  const getTransitionId = networkClient.getTransitionId.bind(networkClient);
+  let cachedHeight: { value: number; at: number } | undefined;
+  networkClient.getBlockRange = (start, end) => throttled(() => getBlockRange(start, end));
+  networkClient.getTransitionId = (inputOrOutputID) =>
+    throttled(() => getTransitionId(inputOrOutputID));
+  networkClient.getLatestHeight = () => {
+    if (cachedHeight !== undefined && Date.now() - cachedHeight.at < HEIGHT_CACHE_MS) {
+      return Promise.resolve(cachedHeight.value);
+    }
+    return throttled(async () => {
+      const value = await getLatestHeight();
+      cachedHeight = { value, at: Date.now() };
+      return value;
+    });
+  };
+  try {
+    return await fn();
+  } finally {
+    networkClient.getBlockRange = getBlockRange;
+    networkClient.getLatestHeight = getLatestHeight;
+    networkClient.getTransitionId = getTransitionId;
+  }
 }
 
 export interface RecordScanOptions {
@@ -65,13 +110,13 @@ async function scanForRecord(
   options: RecordScanOptions = {},
 ): Promise<RecordPlaintext | undefined> {
   const floor = options.minHeight ?? 0;
-  let end = await withRetries(() => networkClient.getLatestHeight());
-  // Nonces of records already collected, so retried windows skip them.
-  const nonces: string[] = [];
-  while (end > floor) {
-    const start = Math.max(floor, end - SCAN_WINDOW_BLOCKS);
-    const records = await withRetries(() =>
-      networkClient.findUnspentRecords(
+  return withPacedClient(networkClient, async () => {
+    let end = await networkClient.getLatestHeight();
+    // Nonces of records already collected, so retried windows skip them.
+    const nonces: string[] = [];
+    while (end > floor) {
+      const start = Math.max(floor, end - SCAN_WINDOW_BLOCKS);
+      const records = await networkClient.findUnspentRecords(
         start,
         end,
         programs,
@@ -79,17 +124,15 @@ async function scanForRecord(
         undefined,
         nonces,
         privateKey,
-      ),
-    );
-    for (const record of records) {
-      nonces.push(record.nonce());
-      if (match(record)) return record;
+      );
+      for (const record of records) {
+        nonces.push(record.nonce());
+        if (match(record)) return record;
+      }
+      end = start;
     }
-    end = start;
-    // Pace the windows: the public explorer rate-limits aggressive scans.
-    if (end > floor) await sleep(SCAN_WINDOW_DELAY_MS);
-  }
-  return undefined;
+    return undefined;
+  });
 }
 
 function recordAmount(record: RecordPlaintext, member: string): bigint | undefined {
