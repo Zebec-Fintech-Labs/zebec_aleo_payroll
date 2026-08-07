@@ -1,5 +1,5 @@
 import { useState } from "react";
-import programSource from "../../../build/aacs_payroll_v2/aacs_payroll_v2.aleo?raw";
+import programSource from "../../../build/test_zebec_payroll/test_zebec_payroll.aleo?raw";
 import { DEFAULT_FEE } from "../config.ts";
 import type { UsePayroll } from "../hooks/usePayroll.ts";
 import { parseFee } from "./form.ts";
@@ -36,7 +36,7 @@ export default function DeployPage({ payroll }: { payroll: UsePayroll }) {
     <section className="card">
       <h2>Deploy / upgrade program</h2>
       <p className="muted" style={{ fontSize: "0.85rem" }}>
-        Deploys <code>build/aacs_payroll_v2/aacs_payroll_v2.aleo</code> (
+        Deploys <code>build/test_zebec_payroll/test_zebec_payroll.aleo</code> (
         {programSource.length.toLocaleString()} bytes) through the wallet. The same
         call upgrades an existing upgradable deployment of the program.
       </p>

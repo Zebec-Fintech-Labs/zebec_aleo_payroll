@@ -105,8 +105,8 @@ const BPS_DENOMINATOR: u64 = 10_000u64;
 // Maximum number of fee tiers supported per payroll config.
 const MAX_FEE_TIERS: u8 = 8u8;
 
-// The 'aacs_payroll' program.
-program aacs_payroll_v2.aleo {
+// The 'test_zebec_payroll' program.
+program test_zebec_payroll.aleo {
     // Payroll configurations, keyed by unique config name (a BHP256 hash of
     // the off-chain name).
     mapping payroll_config: field => PayrollConfig;

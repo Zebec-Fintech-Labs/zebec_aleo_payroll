@@ -47,7 +47,7 @@ function Shell() {
     <div className="container">
       <header className="header">
         <div>
-          <h1>AACS Payroll</h1>
+          <h1>Zebec Payroll</h1>
           <p className="subtitle">
             {PROGRAM_ID} · testnet
             {connected && address !== null && (

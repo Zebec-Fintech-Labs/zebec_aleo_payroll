@@ -1,7 +1,7 @@
 /**
  * Live testnet integration tests.
  *
- * These run only when `AACS_TEST_PRIVATE_KEY` is set to a funded testnet
+ * These run only when `ZEBEC_TEST_PRIVATE_KEY` is set to a funded testnet
  * private key. They exercise the admin configuration lifecycle end-to-end:
  *
  *   (optionally deploy) -> initialize_config -> set_fee_tier
@@ -9,9 +9,9 @@
  *   client's read methods after each step.
  *
  * Environment variables:
- * - AACS_TEST_PRIVATE_KEY (required): funded testnet private key.
- * - AACS_TEST_HOST (optional): API host, defaults to the testnet explorer.
- * - AACS_DEPLOY=1 (optional): deploy `aacs_payroll_v2.aleo` first when it is
+ * - ZEBEC_TEST_PRIVATE_KEY (required): funded testnet private key.
+ * - ZEBEC_TEST_HOST (optional): API host, defaults to the testnet explorer.
+ * - ZEBEC_DEPLOY=1 (optional): deploy `test_zebec_payroll.aleo` first when it is
  *   not found on the network (costs a deployment fee).
  *
  * Stream-lifecycle transactions (create/pause/withdraw/cancel) are not
@@ -38,19 +38,19 @@ dotenv.config();
 
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 if (!PRIVATE_KEY) {
-  console.warn("AACS_TEST_PRIVATE_KEY is not set; skipping integration tests.");
+  console.warn("ZEBEC_TEST_PRIVATE_KEY is not set; skipping integration tests.");
 }
 const HOST = process.env.ENDPOINT ?? DEFAULT_ENDPOINT;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 const PROGRAM_SOURCE = readFileSync(
-  path.resolve(here, "../../build/aacs_payroll_v2/aacs_payroll_v2.aleo"),
+  path.resolve(here, "../../build/test_zebec_payroll/test_zebec_payroll.aleo"),
   "utf8",
 );
 
 // Random per-run config name so reruns don't collide with existing configs.
-const CONFIG_NAME = configNameToField(`aacs-itest-${randomBytes(8).toString("hex")}`);
+const CONFIG_NAME = configNameToField(`zebec-itest-${randomBytes(8).toString("hex")}`);
 
 describe("testnet integration: admin lifecycle", function () {
   if (!PRIVATE_KEY) {

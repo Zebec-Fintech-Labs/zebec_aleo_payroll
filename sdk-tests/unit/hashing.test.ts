@@ -52,8 +52,8 @@ describe("hashing (known on-chain vectors)", () => {
 
 describe("configNameToField", () => {
   it("is deterministic and returns a canonical field literal", () => {
-    const a = configNameToField("aacs-payroll");
-    assert.equal(a, configNameToField("aacs-payroll"));
+    const a = configNameToField("zebec-payroll");
+    assert.equal(a, configNameToField("zebec-payroll"));
     assert.match(a, /^\d+field$/);
     assert.notEqual(a, configNameToField("other-name"));
 
