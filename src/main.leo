@@ -124,6 +124,7 @@ program test_zebec_payroll.aleo {
     // Sender payroll ticket which can be used for operations like pause/resume/topup/cancel
     record SenderPayrollTicket {
         owner: address,
+        ticket_type: u8, // = 0; means sender ticket
         stream_id: field,
         receiver: address,
         token_program: identifier,
@@ -137,6 +138,7 @@ program test_zebec_payroll.aleo {
     // Receiver payroll ticket which can be used for operation like withdraw
     record ReceiverPayrollTicket {
         owner: address,
+        ticket_type: u8, // = 1; receiver ticket
         sender: address,
         token_program: identifier,
         full_amount: u128,
@@ -146,6 +148,7 @@ program test_zebec_payroll.aleo {
     // Withdrawer payroll tiket which can be used for operation like withdraw on behalf of receiver
     record WithdrawerPayrollTicket {
         owner: address,
+        ticket_type: u8, // = 2; withdrawer ticket
         full_amount: u128,
         stream_id: field,
         sender: address,
@@ -210,6 +213,7 @@ program test_zebec_payroll.aleo {
 
         let sender_ticket = SenderPayrollTicket {
             owner: signer,
+            ticket_type: 0u8,
             stream_id: params.stream_id,
             receiver: params.receiver,
             token_program: token_program,
@@ -222,6 +226,7 @@ program test_zebec_payroll.aleo {
 
         let receiver_ticket = ReceiverPayrollTicket {
             owner: params.receiver,
+            ticket_type: 1u8,
             sender: signer,
             token_program: token_program,
             full_amount: params.amount,
@@ -230,6 +235,7 @@ program test_zebec_payroll.aleo {
 
         let withdrawer = WithdrawerPayrollTicket {
             owner: config.withdrawer,
+            ticket_type: 2u8,
             full_amount: params.amount,
             stream_id: params.stream_id,
             sender: signer,

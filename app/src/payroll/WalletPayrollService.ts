@@ -102,19 +102,20 @@ function recordAmount(plaintext: string, member: string): bigint | undefined {
 }
 
 /**
- * Record plaintexts do not carry the record name, so the three payroll
- * tickets are told apart structurally (ported from sdk/records.ts):
- * - `SenderPayrollTicket` is the only one with `is_cancelable`;
- * - `WithdrawerPayrollTicket` is the only one with both `sender` and
- *   `receiver` members;
- * - `ReceiverPayrollTicket` has `sender` but no `receiver`.
+ * Record plaintexts do not carry the record name, but every payroll ticket
+ * carries a `ticket_type` member (ported from sdk/records.ts): 0 = sender,
+ * 1 = receiver, 2 = withdrawer.
  */
+const TICKET_KIND_BY_TYPE: Record<number, TicketRecordName> = {
+  0: "SenderPayrollTicket",
+  1: "ReceiverPayrollTicket",
+  2: "WithdrawerPayrollTicket",
+};
+
 function classifyTicket(text: string): TicketRecordName | undefined {
-  const has = (member: string) => new RegExp(`${member}:`).test(text);
-  if (has("is_cancelable")) return "SenderPayrollTicket";
-  if (has("sender") && has("receiver")) return "WithdrawerPayrollTicket";
-  if (has("sender")) return "ReceiverPayrollTicket";
-  return undefined;
+  const match = /ticket_type:\s*(\d+)u8/.exec(text);
+  if (match === null) return undefined;
+  return TICKET_KIND_BY_TYPE[Number(match[1])];
 }
 
 function matchesTicket(text: string, recordName: TicketRecordName): boolean {

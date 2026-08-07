@@ -206,23 +206,19 @@ export type TicketRecordName =
   | "WithdrawerPayrollTicket";
 
 /**
- * Record plaintexts do not carry the record name, so the three payroll
- * tickets are told apart structurally (see `main.leo`):
- * - `SenderPayrollTicket` is the only one with `is_cancelable`;
- * - `WithdrawerPayrollTicket` is the only one with both `sender` and
- *   `receiver` members;
- * - `ReceiverPayrollTicket` has `sender` but no `receiver`.
+ * Record plaintexts do not carry the record name, but every payroll ticket
+ * carries a `ticket_type` member (see `main.leo`): 0 = sender, 1 = receiver,
+ * 2 = withdrawer.
  */
+const TICKET_TYPE_BY_NAME: Record<TicketRecordName, number> = {
+  SenderPayrollTicket: 0,
+  ReceiverPayrollTicket: 1,
+  WithdrawerPayrollTicket: 2,
+};
+
 function matchesTicket(text: string, recordName: TicketRecordName): boolean {
-  const has = (member: string) => new RegExp(`${member}:`).test(text);
-  switch (recordName) {
-    case "SenderPayrollTicket":
-      return has("is_cancelable");
-    case "WithdrawerPayrollTicket":
-      return has("sender") && has("receiver");
-    case "ReceiverPayrollTicket":
-      return has("sender") && !has("receiver") && !has("is_cancelable");
-  }
+  const match = /ticket_type:\s*(\d+)u8/.exec(text);
+  return match !== null && Number(match[1]) === TICKET_TYPE_BY_NAME[recordName];
 }
 
 /**
