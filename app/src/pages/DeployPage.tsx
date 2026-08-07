@@ -21,6 +21,7 @@ export default function DeployPage({ payroll }: { payroll: UsePayroll }) {
       return;
     }
     const outcome = await runTx(async (svc) => {
+      console.debug("Deploying program:", programSource.slice(0, 100), "...", programSource.length, "bytes");
       const txId = await svc.deploy(programSource, feeMicro);
       setResult(`deployment submitted: ${txId}\nwaiting for confirmation...`);
       await svc.waitForConfirmation(txId);

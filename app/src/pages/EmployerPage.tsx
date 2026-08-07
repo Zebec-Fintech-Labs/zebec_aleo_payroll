@@ -59,6 +59,7 @@ export default function EmployerPage({ payroll }: { payroll: UsePayroll }) {
       }
       setStreams(rows);
     } catch (e) {
+      console.error("Refresh streams error:", e);
       setListNote(e instanceof Error ? e.message : String(e));
     }
   }, [service]);
@@ -102,6 +103,7 @@ export default function EmployerPage({ payroll }: { payroll: UsePayroll }) {
       feeMicro = parseFee(fee);
       requirePrefix(adminKey, "APrivateKey1", "admin attestation key");
     } catch (err) {
+      console.error("Create stream error:", err);
       setFormError(err instanceof Error ? err.message : String(err));
       return;
     }

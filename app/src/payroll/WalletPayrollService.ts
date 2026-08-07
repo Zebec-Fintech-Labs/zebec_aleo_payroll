@@ -183,9 +183,13 @@ export class WalletPayrollService {
       autoWithdrawalFee =
         config.platformFee + (params.duration / params.withdrawFrequency) * config.baseFee;
     }
+    console.log("auto-withdrawal fee:", autoWithdrawalFee, "stream fee:", streamFee);
     const creditRecord = await this.findCredits(autoWithdrawalFee + streamFee);
+    console.log("credit record:", creditRecord);
     const tokenRecord = await this.findToken(depositAmount);
+    console.log("token record:", tokenRecord);
     const merkleProofs = await this.getComplianceProofs();
+    console.log("merkle proofs:", merkleProofs);
     const inputs = [
       createStreamParamsToPlaintext(params),
       identLiteral(TOKEN_PROGRAM),
