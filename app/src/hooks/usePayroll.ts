@@ -65,6 +65,7 @@ export function usePayroll(): UsePayroll {
       try {
         return await op(service);
       } catch (e) {
+        console.error("Error runing tx:", e);
         setError(e instanceof Error ? e.message : String(e));
         return undefined;
       } finally {

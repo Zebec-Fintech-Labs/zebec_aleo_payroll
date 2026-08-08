@@ -167,6 +167,9 @@ export function parseFieldLiteral(value: string): string {
 
 /** Parse a `StreamAnchor` mapping value. */
 export function parseStreamAnchor(plaintext: string): StreamAnchor {
+  if (!plaintext) {
+    throw new Error("Plaintext value is empty: " + plaintext);
+  }
   const m = parseStructMembers(plaintext);
   return {
     streamId: parseFieldLiteral(requireMember(m, "stream_id")),
@@ -189,6 +192,9 @@ export function parseStreamAnchor(plaintext: string): StreamAnchor {
 
 /** Parse a `PayrollConfig` mapping value. */
 export function parsePayrollConfig(plaintext: string): PayrollConfig {
+  if (!plaintext) {
+    throw new Error("value is empty: " + plaintext);
+  }
   const m = parseStructMembers(plaintext);
   return {
     admin: requireMember(m, "admin"),
@@ -202,6 +208,9 @@ export function parsePayrollConfig(plaintext: string): PayrollConfig {
 
 /** Parse a `FeeTier` mapping value. */
 export function parseFeeTier(plaintext: string): FeeTier {
+  if (!plaintext) {
+    throw new Error("value is empty: " + plaintext);
+  }
   const m = parseStructMembers(plaintext);
   return {
     minAmount: parseIntLiteral(requireMember(m, "min_amount")),

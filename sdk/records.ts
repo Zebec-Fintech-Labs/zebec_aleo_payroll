@@ -4,9 +4,41 @@
  * stream deposits, and payroll ticket records for stream management.
  */
 
+import * as fs from "node:fs";
+import { join } from "node:path";
+
 import type { AleoNetworkClient, RecordPlaintext } from "@provablehq/sdk";
 
 const CREDITS_PROGRAM = "credits.aleo";
+
+/**
+ * Nonces collected during scans are persisted under `.nonce-cache/`, one
+ * JSON file per program (e.g. `.nonce-cache/credits.aleo.json`), so later
+ * scans pass them to `findUnspentRecords` and skip those records instead of
+ * re-collecting them. Note that a cached record is excluded from every
+ * future scan of that program, whatever the `match` criteria — delete the
+ * cache file to make those records scannable again.
+ */
+const NONCE_CACHE_DIR = ".nonce-cache";
+
+function nonceCacheFile(programs: string[]): string {
+  return join(NONCE_CACHE_DIR, `${programs.join("+")}.json`);
+}
+
+function loadNonceCache(file: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((nonce): nonce is string => typeof nonce === "string");
+  } catch {
+    return [];
+  }
+}
+
+function saveNonceCache(file: string, nonces: string[]): void {
+  fs.mkdirSync(NONCE_CACHE_DIR, { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(nonces, null, 2)}\n`);
+}
 
 /**
  * `AleoNetworkClient.findUnspentRecords` walks the chain backwards in
@@ -113,7 +145,9 @@ async function scanForRecord(
   return withPacedClient(networkClient, async () => {
     let end = await networkClient.getLatestHeight();
     // Nonces of records already collected, so retried windows skip them.
-    const nonces: string[] = [];
+    // Seeded from the per-program cache and persisted as the scan progresses.
+    const cacheFile = nonceCacheFile(programs);
+    const nonces: string[] = loadNonceCache(cacheFile);
     while (end > floor) {
       const start = Math.max(floor, end - SCAN_WINDOW_BLOCKS);
       const records = await networkClient.findUnspentRecords(
@@ -127,8 +161,12 @@ async function scanForRecord(
       );
       for (const record of records) {
         nonces.push(record.nonce());
-        if (match(record)) return record;
+        if (match(record)) {
+          saveNonceCache(cacheFile, nonces);
+          return record;
+        }
       }
+      saveNonceCache(cacheFile, nonces);
       end = start;
     }
     return undefined;
