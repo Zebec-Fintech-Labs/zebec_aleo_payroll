@@ -110,6 +110,23 @@ export interface PayrollClientOptions {
   programSource?: string;
   /** Imported program sources keyed by program id (e.g. `credits.aleo`). */
   programImports?: Record<string, string>;
+  /**
+   * Base URI of a delegated proving service (e.g. `https://<host>/testnet`;
+   * the SDK POSTs to `<proverUri>/prove/request`). When set, transactions are
+   * proven remotely and broadcast by the service instead of being proven
+   * locally — use this on machines without enough RAM/CPU to synthesize
+   * proving keys and proofs locally.
+   */
+  proverUri?: string;
+  /**
+   * Provable API key for the delegated proving service (register a free
+   * consumer via `POST https://api.provable.com/consumers`). Required when
+   * `proverUri` points at Provable's DPS; the SDK mints/refreshes JWTs
+   * automatically. Unneeded for a self-hosted prover.
+   */
+  proverApiKey?: string;
+  /** Provable consumer id paired with `proverApiKey`. */
+  proverConsumerId?: string;
 }
 
 /** Per-execution options (fee handling). */

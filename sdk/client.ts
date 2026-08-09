@@ -5,6 +5,7 @@
 
 import {
   Account,
+  AleoKeyProvider,
   AleoNetworkClient,
   ProgramManager,
   type RecordPlaintext,
@@ -52,13 +53,18 @@ export class PayrollService {
   private readonly privateKey?: string;
   private readonly programSource?: string;
   private readonly programImports?: Record<string, string>;
+  private readonly proverUri?: string;
+  private readonly proverApiKey?: string;
+  private readonly proverConsumerId?: string;
   private readonly programSourceCache = new Map<string, string>();
 
   constructor(options: PayrollServiceOptions = {}) {
     const host = options.host ?? DEFAULT_ENDPOINT;
     this.programId = options.programId ?? PROGRAM_ID;
     this.networkClient = new AleoNetworkClient(host);
-    this.programManager = new ProgramManager(host);
+    const keyProvider = new AleoKeyProvider();
+    keyProvider.useCache(true);
+    this.programManager = new ProgramManager(host, keyProvider);
     if (options.privateKey !== undefined) {
       this.privateKey = options.privateKey;
       this.account = new Account({ privateKey: options.privateKey });
@@ -69,6 +75,15 @@ export class PayrollService {
     }
     if (options.programImports !== undefined) {
       this.programImports = options.programImports;
+    }
+    if (options.proverUri !== undefined) {
+      this.proverUri = options.proverUri;
+    }
+    if (options.proverApiKey !== undefined) {
+      this.proverApiKey = options.proverApiKey;
+    }
+    if (options.proverConsumerId !== undefined) {
+      this.proverConsumerId = options.proverConsumerId;
     }
   }
 
@@ -389,6 +404,10 @@ export class PayrollService {
     // imports of the payroll program, so their sources must be supplied
     // explicitly for the snarkVM process to contain their stacks.
     const imports = { ...this.programImports, ...extraImports };
+    if (this.proverUri !== undefined) {
+      return this.executeDelegated(functionName, inputs, options, imports);
+    }
+    const keySearchParams = { cacheKey: `${this.programId}:${functionName}` };
     return this.programManager.execute({
       programName: this.programId,
       functionName,
@@ -398,7 +417,47 @@ export class PayrollService {
       ...(this.programSource !== undefined ? { program: this.programSource } : {}),
       ...(Object.keys(imports).length > 0 ? { imports } : {}),
       ...(options.feeRecord !== undefined ? { feeRecord: options.feeRecord } : {}),
+      keySearchParams
     });
+  }
+
+  /**
+   * Execute via a delegated proving service: build a `ProvingRequest` locally
+   * (authorization only, no key synthesis or proof generation) and let the
+   * remote prover produce the proofs and broadcast the transaction. Returns
+   * the broadcast transaction id.
+   */
+  private async executeDelegated(
+    functionName: string,
+    inputs: string[],
+    options: ExecuteOptions,
+    imports: Record<string, string>,
+  ): Promise<string> {
+    const provingRequest = await this.programManager.provingRequest({
+      programName: this.programId,
+      functionName,
+      priorityFee: options.priorityFee ?? 0,
+      privateFee: options.privateFee ?? false,
+      inputs,
+      broadcast: true,
+      ...(this.programSource !== undefined ? { programSource: this.programSource } : {}),
+      ...(Object.keys(imports).length > 0 ? { programImports: imports } : {}),
+      ...(options.feeRecord !== undefined ? { feeRecord: options.feeRecord } : {}),
+    });
+    const response = await this.networkClient.submitProvingRequest({
+      provingRequest,
+      url: this.proverUri!,
+      ...(this.proverApiKey !== undefined ? { apiKey: this.proverApiKey } : {}),
+      ...(this.proverConsumerId !== undefined ? { consumerId: this.proverConsumerId } : {}),
+    });
+    const broadcast = response.broadcast_result;
+    if (broadcast.status !== "Accepted") {
+      const detail = "message" in broadcast ? broadcast.message : undefined;
+      throw new Error(
+        `proving service failed to broadcast the transaction (status: ${broadcast.status})${detail ? `: ${detail}` : ""}`,
+      );
+    }
+    return response.transaction.id;
   }
 
   /**

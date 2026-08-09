@@ -66,15 +66,28 @@ const PROGRAM_SOURCE = fs.readFileSync(
     "utf8",
 );
 
+const PROVER_URI = process.env.PROVER_URI || undefined;
+const PROVER_API_KEY = process.env.PROVER_API_KEY || undefined;
+const PROVER_CONSUMER_ID = process.env.PROVER_CONSUMER_ID || undefined;
+if (PROVER_URI) {
+    console.log("Using delegated proving service:", PROVER_URI);
+}
+
 const senderClient = new PayrollClient({
     host: HOST,
     privateKey: PRIVATE_KEY,
     programSource: PROGRAM_SOURCE,
+    proverUri: PROVER_URI,
+    proverApiKey: PROVER_API_KEY,
+    proverConsumerId: PROVER_CONSUMER_ID,
 });
 const receiverClient = new PayrollClient({
     host: HOST,
     privateKey: RECEIVER_PRIVATE_KEY,
     programSource: PROGRAM_SOURCE,
+    proverUri: PROVER_URI,
+    proverApiKey: PROVER_API_KEY,
+    proverConsumerId: PROVER_CONSUMER_ID,
 });
 const sender = senderClient.account!.address().to_string();
 const receiver = receiverClient.account!.address().to_string();
