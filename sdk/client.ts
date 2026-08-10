@@ -78,6 +78,7 @@ export class PayrollService {
     }
     if (options.proverUri !== undefined) {
       this.proverUri = options.proverUri;
+      this.networkClient.setProverUri(options.proverUri);
     }
     if (options.proverApiKey !== undefined) {
       this.proverApiKey = options.proverApiKey;
@@ -444,27 +445,22 @@ export class PayrollService {
       ...(Object.keys(imports).length > 0 ? { programImports: imports } : {}),
       ...(options.feeRecord !== undefined ? { feeRecord: options.feeRecord } : {}),
     });
-    const response = await this.networkClient.submitProvingRequestSafe({
+    console.log("prover url", this.networkClient.proverUri);
+    const response = await this.networkClient.submitProvingRequest({
       provingRequest,
-      url: this.proverUri!,
       ...(this.proverApiKey !== undefined ? { apiKey: this.proverApiKey } : {}),
       ...(this.proverConsumerId !== undefined ? { consumerId: this.proverConsumerId } : {}),
     });
 
-    if (response.ok) {
-      const broadcast = response.data.broadcast_result;
-      if (broadcast.status.toLowerCase() !== "accepted") {
-        const detail = "message" in broadcast ? broadcast.message : undefined;
-        throw new Error(
-          `proving service failed to broadcast the transaction (status: ${broadcast.status})${detail ? `: ${detail}` : ""}`,
-        );
-      }
-      return response.data.transaction.id;
+    const broadcast = response.broadcast_result;
+    if (broadcast.status.toLowerCase() !== "accepted") {
+      const detail = "message" in broadcast ? broadcast.message : undefined;
+      throw new Error(
+        `proving service failed to broadcast the transaction (status: ${broadcast.status})${detail ? `: ${detail}` : ""}`,
+      );
     }
+    return response.transaction.id;
 
-    console.log(`response: staus:${response.status}; message:${response.error.message}`);
-
-    throw new Error(response.error.message)
   }
 
   /**

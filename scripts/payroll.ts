@@ -55,12 +55,13 @@ if (!RECEIVER_PRIVATE_KEY) {
 }
 // Checked above; bind so closures (e.g. createSignedTokenPrice) see `string`.
 const SENDER_PRIVATE_KEY: string = PRIVATE_KEY;
-const HOST = "https://api.explorer.provable.com/v1";
+const HOST = process.env.ENDPOINT ?? "https://api.explorer.provable.com/v1";
+console.log("HOST:", HOST);
 const FREEZE_LIST_URL =
     "https://api.explorer.provable.com/v2/testnet/programs/test_usdcx_freezelist.aleo/compliance/freeze-list";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-console.log("Current directory:", here);
+// console.log("Current directory:", here);
 const PROGRAM_SOURCE = fs.readFileSync(
     path.resolve(here, "../build/test_zebec_payroll/test_zebec_payroll.aleo"),
     "utf8",
@@ -217,7 +218,18 @@ async function createStream(): Promise<string | bigint> {
         signature,
         feeBps,
         proofs,
-        { priorityFee: 0.1 },
+        {
+            priorityFee: 0.1, creditRecord: `{
+  owner: aleo12czxn500cyj9a7lweuft6r4rrckthfck5k8440qh7atgrnt5kupqsfh038.private,
+  microcredits: 10000000u64.private,
+  _nonce: 6410260858307819024593913311999508957203522779225348165403325458147180369361group.public,
+  _version: 1u8.public
+}`, tokenRecord: `{
+  owner: aleo12czxn500cyj9a7lweuft6r4rrckthfck5k8440qh7atgrnt5kupqsfh038.private,
+  amount: 40000000u128.private,
+  _nonce: 5129322304556379667216924448175967718654626044730865730388167874744975697882group.public,
+  _version: 1u8.public
+}` },
     );
     console.log("Create stream transaction ID:", txId);
     await waitForConfirmation(txId);
