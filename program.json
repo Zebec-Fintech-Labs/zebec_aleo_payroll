@@ -15,7 +15,7 @@
   ],
   "description": "",
   "dev_dependencies": null,
-  "leo": "4.3.4",
+  "leo": "4.4.1",
   "license": "MIT",
   "program": "test_zebec_payroll.aleo",
   "version": "0.1.1"
