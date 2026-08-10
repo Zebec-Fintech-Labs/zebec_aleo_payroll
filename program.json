@@ -2,12 +2,6 @@
   "dependencies": [
     {
       "edition": null,
-      "location": "local",
-      "name": "iarc22",
-      "path": "iarc22"
-    },
-    {
-      "edition": null,
       "location": "network",
       "name": "credits.aleo",
       "path": null

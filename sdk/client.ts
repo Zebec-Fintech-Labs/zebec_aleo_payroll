@@ -441,10 +441,19 @@ export class PayrollService {
       privateFee: options.privateFee ?? false,
       inputs,
       broadcast: true,
+      // preparedProgram: await this.programManager.prepareProgram({
+      //   programName: this.programId, functionName, programImports: imports, ...(this.programSource !== undefined ? { programSource: this.programSource } : {})
+      // }),
+      unchecked: false,
       ...(this.programSource !== undefined ? { programSource: this.programSource } : {}),
       ...(Object.keys(imports).length > 0 ? { programImports: imports } : {}),
       ...(options.feeRecord !== undefined ? { feeRecord: options.feeRecord } : {}),
     });
+    try {
+      console.log("proving request authorization:", provingRequest.authorization().toString());
+    } catch (e) {
+      console.log("could not dump proving request authorization:", (e as Error).message ?? e);
+    }
     console.log("prover url", this.networkClient.proverUri);
     const response = await this.networkClient.submitProvingRequest({
       provingRequest,
