@@ -168,6 +168,7 @@ program test_zebec_payroll.aleo {
         sender_merkle_proofs: [iarc22::MerkleProof; 2]
     ) -> Final {
         let signer: address = std::ctx::signer();
+        let self_address: address = std::ctx::addr();
 
         assert(params.duration > 0u64);
         assert(!params.can_topup || (params.initial_buffer_amount > 0u128 && params.initial_buffer_amount <= params.amount));
@@ -208,7 +209,7 @@ program test_zebec_payroll.aleo {
         
         let (comp, change, f_deposit_amount_transfer): (dyn record, dyn record, Final) =
             iarc22::IARC22@(token_program)::transfer_private_to_public(
-                self.address, deposit_amount, token_input_record, sender_merkle_proofs
+                self_address, deposit_amount, token_input_record, sender_merkle_proofs
             );
 
         let sender_ticket = SenderPayrollTicket {
@@ -393,6 +394,8 @@ program test_zebec_payroll.aleo {
         now: i64,
     )-> (SenderPayrollTicket, Final) {
         let signer: address = std::ctx::signer();
+        let self_address:  address = std::ctx::addr();
+
         // Check: Signer is the sender payroll ticket owner
         assert(signer == ticket_record.owner);
         assert(ticket_record.is_cancelable);
@@ -425,12 +428,12 @@ program test_zebec_payroll.aleo {
 
         let (comp_a, token_a, f_sender_amount_transfer) 
             = iarc22::IARC22@(ticket_record.token_program)::transfer_from_public_to_private(
-                self.address, ticket_record.owner, sender_amount
+                self_address, ticket_record.owner, sender_amount
             );
 
         let (comp_b, token_b, f_receiver_amount_transfer) 
             = iarc22::IARC22@(ticket_record.token_program)::transfer_from_public_to_private(
-                self.address, ticket_record.receiver, currently_withdrawable_amount
+                self_address, ticket_record.receiver, currently_withdrawable_amount
             );
         
         let stream_id = ticket_record.stream_id;
@@ -478,6 +481,8 @@ program test_zebec_payroll.aleo {
         now: i64,
     )-> (ReceiverPayrollTicket, Final) {
         let signer: address = std::ctx::signer();
+        let self_address: address = std::ctx::addr();
+
         // Check: Signer is the receiver payroll ticket owner
         assert(signer == ticket_record.owner);
         // Check: Stream has started
@@ -509,7 +514,7 @@ program test_zebec_payroll.aleo {
 
         let (comp, token, f_receiver_amount_transfer) 
             = iarc22::IARC22@(ticket_record.token_program)::transfer_from_public_to_private(
-                self.address, ticket_record.owner, capped_withdrawable_amount
+                self_address, ticket_record.owner, capped_withdrawable_amount
             );
         
         let stream_id = ticket_record.stream_id;

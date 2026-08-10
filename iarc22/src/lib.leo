@@ -1,9 +1,9 @@
-struct MerkleProof {
+export struct MerkleProof {
     siblings: [field; 16],
     leaf_index: u32,
 }
 
-interface IARC22 {
+export interface IARC22 {
     record Token {
         owner: address,
         amount: u128,
