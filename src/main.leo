@@ -107,6 +107,20 @@ struct PayrollConfig {
     initialized: bool,
 }
 
+struct Payroll {
+    stream_id: field,
+    sender: address,
+    receiver: address,
+    full_amount: u128,
+    token_program: identifier,
+    is_cancelable: bool,
+    is_pausable: bool,
+    auto_withdrawable: bool,
+    can_topup: bool,
+    topup_count: u64,
+    initialized: bool,
+}
+
 struct StreamAnchor {
     stream_id: field,
     start_time: i64,
@@ -118,7 +132,6 @@ struct StreamAnchor {
     covered_until: i64,
     last_paused_time: i64,
     paused_interval: u64,
-    auto_withdrawable: bool,
     withdrawn_amount: u128,
     is_public: bool,
     created_timestamp: i64,
@@ -166,6 +179,8 @@ struct Config {
     platform_fee: u64,
 }
 
+
+
 // Usd price decimal scale. Used to resolve floating point value of price
 // by multiplying price by this scale.
 const USD_PRICE_DECIMALS_SCALE: u64 = 1_000_000u64;
@@ -189,6 +204,8 @@ program test_zebec_payroll_v2.aleo {
     mapping whitelisted_token_programs: field => bool;
     // Map of stream_id and stream anchor
     mapping stream_anchors: field => StreamAnchor;
+    // Map of stream_id and payroll info
+    mapping payrolls: field => Payroll;
     // Map of Token Price nonce => used;
     mapping token_price_nonces: field => bool;
 
@@ -213,6 +230,7 @@ program test_zebec_payroll_v2.aleo {
         sender: address,
         token_program: identifier,
         full_amount: u128,
+        auto_withdrawable: bool,
         stream_id: field,
     }
 
@@ -225,6 +243,7 @@ program test_zebec_payroll_v2.aleo {
         sender: address,
         receiver: address,
         token_program: identifier,
+        auto_withdrawable: bool,
     }
     
     fn create_stream_private(
@@ -256,16 +275,11 @@ program test_zebec_payroll_v2.aleo {
             fee_bps
         );
 
-        let auto_withdrawal_fee: u64 = 0u64;
-        // Leo flattens `if` branches: the division below executes even when
-        // auto-withdrawal is disabled, so the divisor must be guarded.
-        let safe_withdraw_frequency: u64 = params.withdraw_frequency > 0u64 ? params.withdraw_frequency : 1u64;
-        if (params.auto_withdrawable) {
-            assert(params.withdraw_frequency > 0u64);
-
-            let transaction_fee = (params.duration / safe_withdraw_frequency) * config.base_fee;
-            auto_withdrawal_fee = config.platform_fee + transaction_fee;
-        }
+        assert(!params.auto_withdrawable || params.withdraw_frequency >= 2u64); // minimum is per 2 seconds
+        
+        let auto_withdrawal_fee: u64 = params.auto_withdrawable ? 
+            ((params.duration / params.withdraw_frequency) * config.base_fee) + config.platform_fee : 
+            0u64;
 
         assert(credit_input_record.microcredits >= auto_withdrawal_fee + stream_fee);
 
@@ -293,7 +307,7 @@ program test_zebec_payroll_v2.aleo {
             is_cancelable: params.is_cancelable,
             is_pausable: params.is_pausable,
             can_topup: params.can_topup,
-            topup_count: 1u64, // initial funding counts as topup
+            topup_count: params.can_topup ? 1u64 : 0u64, // initial buffer funding counts as topup
         };
 
         let receiver_ticket = ReceiverPayrollTicket {
@@ -302,6 +316,7 @@ program test_zebec_payroll_v2.aleo {
             sender: signer,
             token_program: token_program,
             full_amount: params.amount,
+            auto_withdrawable: params.auto_withdrawable,
             stream_id: params.stream_id,
         };
 
@@ -313,6 +328,7 @@ program test_zebec_payroll_v2.aleo {
             sender: signer,
             receiver: params.receiver,
             token_program: token_program,
+            auto_withdrawable: params.auto_withdrawable,
         };
 
         return final {
@@ -322,7 +338,7 @@ program test_zebec_payroll_v2.aleo {
             assert(params.duration > 0u64);
             assert(params.receiver != signer);
             assert(params.amount > 0u128);
-            assert(!params.start_now || params.start_time >= now);
+            assert(params.start_now || params.start_time >= now);
             assert(!params.can_topup || (params.initial_buffer_amount > 0u128 && params.initial_buffer_amount <= params.amount));
 
             // Checks: fee bps check
@@ -341,6 +357,10 @@ program test_zebec_payroll_v2.aleo {
             // Verify nonce is not used. (Resolves replay attack)
             let used = token_price_nonces.get_or_use(token_price.nonce, false);
             assert(!used);
+            // Consume the nonce so the signed price cannot be replayed.
+            token_price_nonces.set(token_price.nonce, true);
+            // The signed price must be for the token actually being streamed.
+            assert(token_price.stream_token == token_program);
             // Message the admin signed: token id || prices || expiry || nonce.
             let price_message: field = BHP256::hash_to_field(token_price);
             // Verified on-chain with a Schnorr signature against the config
@@ -394,7 +414,6 @@ program test_zebec_payroll_v2.aleo {
                 covered_until: covered_until,
                 last_paused_time: 0i64,
                 paused_interval: 0u64,
-                auto_withdrawable: params.auto_withdrawable,
                 withdrawn_amount: 0u128,
                 is_public: false,
                 created_timestamp: now,
@@ -459,7 +478,7 @@ program test_zebec_payroll_v2.aleo {
         });
     }
 
-    fn cancel_private(
+    fn cancel_stream_private(
         ticket_record: SenderPayrollTicket,
         stream_anchor: StreamAnchor,
         now: i64,
@@ -528,7 +547,6 @@ program test_zebec_payroll_v2.aleo {
             assert(stream.covered_until == stream_anchor.covered_until);
             assert(stream.last_paused_time == stream_anchor.last_paused_time);
             assert(stream.paused_interval == stream_anchor.paused_interval);
-            assert(stream.auto_withdrawable == stream_anchor.auto_withdrawable);
             assert(stream.withdrawn_amount == stream_anchor.withdrawn_amount);
             assert(stream.is_public == stream_anchor.is_public);
             assert(stream.created_timestamp == stream_anchor.created_timestamp);
@@ -546,7 +564,7 @@ program test_zebec_payroll_v2.aleo {
         });
     }
 
-    fn withdraw_private(
+    fn withdraw_stream_private(
         ticket_record: ReceiverPayrollTicket,
         stream_anchor: StreamAnchor,
         now: i64,
@@ -561,6 +579,7 @@ program test_zebec_payroll_v2.aleo {
         assert(stream_anchor.start_time <= now);
         assert(!stream_anchor.canceled);
         assert(!stream_anchor.is_public);
+        // assert()
 
         let effective_time: i64 = stream_anchor.paused ? stream_anchor.last_paused_time : now;
         // Check: Stream has started
@@ -609,7 +628,6 @@ program test_zebec_payroll_v2.aleo {
             assert(stream.covered_until == stream_anchor.covered_until);
             assert(stream.last_paused_time == stream_anchor.last_paused_time);
             assert(stream.paused_interval == stream_anchor.paused_interval);
-            assert(stream.auto_withdrawable == stream_anchor.auto_withdrawable);
             assert(stream.withdrawn_amount == stream_anchor.withdrawn_amount);
             assert(stream.is_public == stream_anchor.is_public);
             assert(stream.created_timestamp == stream_anchor.created_timestamp);
@@ -624,6 +642,411 @@ program test_zebec_payroll_v2.aleo {
 
             f_receiver_amount_transfer.run();
         });
+    }
+
+    fn create_stream_public(
+        params: CreateStreamParams,
+        token_program: identifier,
+        config: Config,
+        token_price: TokenPrice,
+        price_signature: signature,
+        fee_bps: u64,
+    ) -> Final {
+        let signer: address = std::ctx::signer();
+        let self_address: address = std::ctx::addr();
+
+        assert(params.duration > 0u64);
+        assert(!params.can_topup || (params.initial_buffer_amount > 0u128 && params.initial_buffer_amount <= params.amount));
+
+        let deposit_amount: u128 = params.can_topup ? params.initial_buffer_amount: params.amount;
+        assert(deposit_amount > 0u128);
+
+        let (usd_value, stream_fee) = compute_stream_fee(
+            params.amount, 
+            token_price.stream_token_price_usd, 
+            token_price.aleo_price_usd, 
+            fee_bps
+        );
+
+        let auto_withdrawal_fee: u64 = 0u64;
+        // Leo flattens `if` branches: the division below executes even when
+        // auto-withdrawal is disabled, so the divisor must be guarded.
+        let safe_withdraw_frequency: u64 = params.withdraw_frequency > 0u64 ? params.withdraw_frequency : 86400u64; // 1 day by default;
+        if (params.auto_withdrawable) {
+            assert(params.withdraw_frequency > 0u64);
+
+            let transaction_fee = (params.duration / safe_withdraw_frequency) * config.base_fee;
+            auto_withdrawal_fee = config.platform_fee + transaction_fee;
+        }
+
+        // ALEO fees are paid from the signer's public credits balance.
+        let f_stream_fee_transfer: Final =
+            credits.aleo::transfer_public_as_signer(config.fee_vault, stream_fee);
+        let f_auto_withdrawal_fee_transfer: Final =
+            credits.aleo::transfer_public_as_signer(config.withdrawer, auto_withdrawal_fee);
+
+        // Pull the token deposit into the program's public balance.
+        // Prerequisite: the sender must have called `approve_public` on the
+        // token program, approving this program for at least `deposit_amount`.
+        let f_deposit_transfer: Final =
+            IARC22@(token_program)::transfer_from_public(signer, self_address, deposit_amount);
+
+        return final {
+            let now: i64 = std::ctx::block_timestamp();
+
+            // Checks: stream parameter validation
+            assert(params.duration > 0u64);
+            assert(params.receiver != signer);
+            assert(params.amount > 0u128);
+            assert(params.start_now || params.start_time >= now);
+            assert(!params.can_topup || (params.initial_buffer_amount > 0u128 && params.initial_buffer_amount <= params.amount));
+
+            // Checks: fee bps check
+            assert(fee_bps <= BPS_DENOMINATOR);
+
+            // Checks: config & fee re-verification
+            let chain_config: PayrollConfig = payroll_config.get(config.config_name);
+            assert(chain_config.fee_vault == config.fee_vault);
+            assert(chain_config.withdrawer == config.withdrawer);
+            assert(chain_config.base_fee == config.base_fee);
+            assert(chain_config.platform_fee == config.platform_fee);
+
+            // Checks: backend-signed token price
+            // Verify token price has not expired.
+            assert(now < token_price.price_expiry);
+            // Verify nonce is not used. (Resolves replay attack)
+            let used = token_price_nonces.get_or_use(token_price.nonce, false);
+            assert(!used);
+            // Consume the nonce so the signed price cannot be replayed.
+            token_price_nonces.set(token_price.nonce, true);
+            // The signed price must be for the token actually being streamed.
+            assert(token_price.stream_token == token_program);
+            // Message the admin signed: token id || prices || expiry || nonce.
+            let price_message: field = BHP256::hash_to_field(token_price);
+            // Verified on-chain with a Schnorr signature against the config
+            // admin's public key.
+            let price_valid: bool =
+                std::sig::verify_schnorr(price_signature, config.admin, price_message);
+            assert(price_valid);
+
+            // Checks: token whitelist (scoped to this config)
+            let whitelist_key: field = BHP256::hash_to_field(
+                WhitelistKey { config: config.config_name, token_program: token_program },
+            );
+            let allowed = whitelisted_token_programs.get_or_use(whitelist_key, false);
+            assert(allowed);
+
+            // Checks: fee tier for the stream's USD value
+            let tier_found: bool = false;
+            let tier_fee: u64 = 0u64;
+            for i: u8 in 0u8..MAX_FEE_TIERS {
+                let tier_key: field = BHP256::hash_to_field(
+                    FeeTierKey { config: config.config_name, index: i },
+                );
+                let tier: FeeTier = fee_tiers.get_or_use(
+                    tier_key,
+                    FeeTier { min_amount: 0u64, max_amount: 0u64, fee_bps: 0u64 },
+                );
+                let matches: bool = !tier_found
+                    && usd_value > tier.min_amount
+                    && usd_value <= tier.max_amount;
+                tier_found = tier_found || matches;
+                tier_fee = matches ? tier.fee_bps : tier_fee;
+            }
+            assert(tier_found);
+            assert(tier_fee == fee_bps);
+
+            // Checks: stream id is fresh
+            assert(!stream_anchors.contains(params.stream_id));
+            assert(!payrolls.contains(params.stream_id));
+
+            let start_time: i64 = params.start_now ? now : params.start_time;
+            let buffer_secs: u64 = ((deposit_amount * params.duration as u128) / params.amount) as u64;
+            let covered_until: i64 = params.can_topup ? start_time + buffer_secs as i64 : 0i64;
+
+            let stream_anchor = StreamAnchor {
+                stream_id: params.stream_id,
+                start_time: start_time,
+                duration: params.duration,
+                paused: false,
+                canceled: false,
+                canceled_at: 0i64,
+                deposited_amount: deposit_amount,
+                covered_until: covered_until,
+                last_paused_time: 0i64,
+                paused_interval: 0u64,
+                withdrawn_amount: 0u128,
+                is_public: true,
+                created_timestamp: now,
+                initialized: true,
+            };
+            stream_anchors.set(params.stream_id, stream_anchor);
+
+            // Public mode stores the payroll metadata in a mapping instead of
+            // issuing sender/receiver/withdrawer ticket records.
+            let payroll = Payroll {
+                stream_id: params.stream_id,
+                sender: signer,
+                receiver: params.receiver,
+                full_amount: params.amount,
+                token_program: token_program,
+                is_cancelable: params.is_cancelable,
+                is_pausable: params.is_pausable,
+                can_topup: params.can_topup,
+                topup_count: params.can_topup ? 1u64 : 0u64, // initial buffer funding counts as topup
+                auto_withdrawable: params.auto_withdrawable,
+                initialized: true
+            };
+            payrolls.set(params.stream_id, payroll);
+
+            f_stream_fee_transfer.run();
+            f_auto_withdrawal_fee_transfer.run();
+            f_deposit_transfer.run();
+        };
+    }
+
+    fn pause_resume_stream_public(
+        stream_id: field,
+    )-> Final {
+        let signer: address = std::ctx::signer();
+        
+        return final {
+            let now: i64 = std::ctx::block_timestamp();
+
+            // Check: Validate payroll anchor exists
+            assert(payrolls.contains(stream_id));
+            let payroll = payrolls.get(stream_id);
+            assert(signer == payroll.sender);
+            assert(payroll.is_pausable);
+
+            // Check: Validate the streams exists
+            assert(stream_anchors.contains(stream_id));
+
+            let anchor = stream_anchors.get(stream_id);
+            // Check: Stream is not canceled
+            assert(!anchor.canceled);
+            assert(anchor.is_public);
+            // Check: Stream has started
+            assert(anchor.start_time <= now);
+
+            if (anchor.paused) {
+                // |--------------|-----|--------------|-------------|
+                // st               ppi                lpt         now
+                let prev_paused_interval: u64 = anchor.paused_interval; // may be 0 or value.
+                assert(anchor.last_paused_time <= now);
+                let paused_interval = prev_paused_interval + (now as u64 - anchor.last_paused_time as u64);
+                let resumed_stream = StreamAnchor {
+                    ..anchor
+                };
+                resumed_stream.paused_interval = paused_interval;
+                resumed_stream.paused  = false;
+                resumed_stream.last_paused_time = 0i64;
+                stream_anchors.set(stream_id, resumed_stream);
+            } else {
+                let prev_paused_interval: u64 = anchor.paused_interval;
+                let elapsed_duration: u64 = (now as u64 - anchor.start_time as u64) - prev_paused_interval;
+                // Check: Stream has not ended
+                assert(elapsed_duration < anchor.duration);
+                let paused_stream = StreamAnchor {
+                    ..anchor
+                };
+                paused_stream.paused = true;
+                paused_stream.last_paused_time = now;
+                stream_anchors.set(stream_id, paused_stream); 
+            }
+        };
+    }
+
+    fn cancel_stream_public(
+        payroll: Payroll,
+        stream_anchor: StreamAnchor,
+        now: i64,
+    ) -> Final {
+        let signer: address = std::ctx::signer();
+        let self_address: address = std::ctx::addr();
+
+        // Check: Signer is the sender payroll ticket owner
+        assert(signer == payroll.sender);
+        assert(payroll.is_cancelable);
+        assert(payroll.initialized);
+        assert(stream_anchor.stream_id == payroll.stream_id);
+        assert(stream_anchor.initialized);
+        assert(!stream_anchor.canceled);
+        assert(stream_anchor.is_public);
+        
+        let effective_time: i64 = stream_anchor.paused ? stream_anchor.last_paused_time : now;
+        // Check: Stream has started
+        assert(stream_anchor.start_time <= effective_time);
+        // Check: Stream has not ended
+        let prev_paused_interval: u64 = stream_anchor.paused_interval;
+        let elapsed_duration: u64 = (effective_time as u64 - stream_anchor.start_time as u64) - prev_paused_interval;
+        assert(elapsed_duration < stream_anchor.duration);
+        
+        let (total_withdrawable_amount, currently_withdrawable_amount) = compute_withdrawable_amount(
+            effective_time,
+            stream_anchor.start_time,
+            stream_anchor.duration,
+            stream_anchor.paused_interval,
+            payroll.full_amount,
+            stream_anchor.withdrawn_amount
+        );
+
+        assert(total_withdrawable_amount <= payroll.full_amount);
+        assert(total_withdrawable_amount <= stream_anchor.deposited_amount);
+
+        let sender_amount: u128 = stream_anchor.deposited_amount - total_withdrawable_amount;
+
+        let payroll_token_program = payroll.token_program;
+        let f_sender_amount_transfer: Final 
+            = IARC22@(payroll_token_program)::transfer_from_public(
+                self_address, payroll.sender, sender_amount
+            );
+
+        let f_receiver_amount_transfer: Final 
+            = IARC22@(payroll_token_program)::transfer_from_public(
+                self_address, payroll.receiver, currently_withdrawable_amount
+            );
+        
+        return final {
+            let real_now = std::ctx::block_timestamp();
+            // Check: Validate now time discrepancy is within 5 seconds
+            assert((real_now - now).abs() <= 5i64);
+            assert(stream_anchor.stream_id == payroll.stream_id);
+            // Check: Validate the payroll exists
+            assert(payrolls.contains(payroll.stream_id));
+            let onchain_payroll = payrolls.get(payroll.stream_id);
+            // Check On chain payroll matches the provided payroll
+            assert(onchain_payroll.stream_id == payroll.stream_id);
+            assert(onchain_payroll.sender == payroll.sender);
+            assert(onchain_payroll.receiver == payroll.receiver);
+            assert(onchain_payroll.full_amount == payroll.full_amount);
+            assert(onchain_payroll.token_program == payroll.token_program);
+            assert(onchain_payroll.is_cancelable == payroll.is_cancelable);
+            assert(onchain_payroll.is_pausable == payroll.is_pausable);
+            assert(onchain_payroll.can_topup == payroll.can_topup);
+            assert(onchain_payroll.auto_withdrawable == payroll.auto_withdrawable);
+            assert(onchain_payroll.topup_count == payroll.topup_count);
+            // Check: Validate the streams exists
+            assert(stream_anchors.contains(stream_anchor.stream_id));
+            let onchain_anchor = stream_anchors.get(stream_anchor.stream_id);
+            // Check: On chain stream anchor matches the provided stream anchor
+            assert(onchain_anchor.stream_id == stream_anchor.stream_id);
+            assert(onchain_anchor.start_time == stream_anchor.start_time);
+            assert(onchain_anchor.duration == stream_anchor.duration);
+            assert(onchain_anchor.paused == stream_anchor.paused);
+            assert(onchain_anchor.canceled == stream_anchor.canceled);
+            assert(onchain_anchor.deposited_amount == stream_anchor.deposited_amount);
+            assert(onchain_anchor.covered_until == stream_anchor.covered_until);
+            assert(onchain_anchor.last_paused_time == stream_anchor.last_paused_time);
+            assert(onchain_anchor.paused_interval == stream_anchor.paused_interval);
+            assert(onchain_anchor.withdrawn_amount == stream_anchor.withdrawn_amount);
+            assert(onchain_anchor.is_public == stream_anchor.is_public);
+            assert(onchain_anchor.created_timestamp == stream_anchor.created_timestamp);
+            assert(onchain_anchor.initialized == stream_anchor.initialized);
+
+            let canceled_stream = StreamAnchor {
+                ..onchain_anchor
+            };
+            canceled_stream.canceled = true;
+            canceled_stream.canceled_at = now;
+            stream_anchors.set(stream_anchor.stream_id, canceled_stream);
+
+            f_sender_amount_transfer.run();
+            f_receiver_amount_transfer.run();
+        };
+    }
+
+    fn withdraw_stream_public(
+        payroll: Payroll,
+        stream_anchor: StreamAnchor,
+        now: i64,
+    ) -> Final {
+        let signer: address = std::ctx::signer();
+        let self_address: address = std::ctx::addr();
+
+        // Check: Signer is the receiver of payroll
+        assert(signer == payroll.receiver);
+        assert(payroll.stream_id == stream_anchor.stream_id);
+        assert(payroll.initialized);
+        // Check: Stream has started
+        assert(stream_anchor.initialized);
+        assert(stream_anchor.start_time <= now);
+        assert(!stream_anchor.canceled);
+        assert(!stream_anchor.is_public);
+
+        let effective_time: i64 = stream_anchor.paused ? stream_anchor.last_paused_time : now;
+        // Check: Stream has started
+        assert(stream_anchor.start_time <= effective_time);
+        // Check: Full amount is not withdrawn
+        assert(stream_anchor.withdrawn_amount < payroll.full_amount);
+        assert(stream_anchor.deposited_amount > stream_anchor.withdrawn_amount);
+
+        let (total_withdrawable_amount, currently_withdrawable_amount) = compute_withdrawable_amount(
+            effective_time,
+            stream_anchor.start_time,
+            stream_anchor.duration,
+            stream_anchor.paused_interval,
+            payroll.full_amount,
+            stream_anchor.withdrawn_amount
+        );
+
+        assert(total_withdrawable_amount <= payroll.full_amount);
+        let available_withdraw_amount: u128 = stream_anchor.deposited_amount - stream_anchor.withdrawn_amount;
+        let capped_withdrawable_amount: u128 = currently_withdrawable_amount <= available_withdraw_amount ? currently_withdrawable_amount : available_withdraw_amount;
+        assert(total_withdrawable_amount <= stream_anchor.deposited_amount);
+
+        let f_receiver_amount_transfer: Final 
+            = IARC22@(payroll.token_program)::transfer_from_public(
+                self_address, payroll.receiver, capped_withdrawable_amount
+            );
+        
+        return final {
+            let real_now = std::ctx::block_timestamp();
+            // Check: Validate now time discrepancy is within 5 seconds
+            assert((real_now - now).abs() <= 5i64);
+
+            assert(payroll.stream_id == stream_anchor.stream_id);
+            // Check: Validate the payroll exists
+            assert(payrolls.contains(payroll.stream_id));
+            let onchain_payroll = payrolls.get(payroll.stream_id);
+            // Check On chain payroll matches the provided payroll
+            assert(onchain_payroll.stream_id == payroll.stream_id);
+            assert(onchain_payroll.sender == payroll.sender);
+            assert(onchain_payroll.receiver == payroll.receiver);
+            assert(onchain_payroll.full_amount == payroll.full_amount);
+            assert(onchain_payroll.token_program == payroll.token_program);
+            assert(onchain_payroll.is_cancelable == payroll.is_cancelable);
+            assert(onchain_payroll.is_pausable == payroll.is_pausable);
+            assert(onchain_payroll.can_topup == payroll.can_topup);
+            assert(onchain_payroll.auto_withdrawable == payroll.auto_withdrawable);
+            assert(onchain_payroll.topup_count == payroll.topup_count);
+            // Check: Validate the streams exists
+            assert(stream_anchors.contains(stream_anchor.stream_id));
+            let onchain_anchor = stream_anchors.get(stream_anchor.stream_id);
+            // Check: Stream anchor matches the provided stream anchor
+            assert(onchain_anchor.stream_id == stream_anchor.stream_id);
+            assert(onchain_anchor.start_time == stream_anchor.start_time);
+            assert(onchain_anchor.duration == stream_anchor.duration);
+            assert(onchain_anchor.paused == stream_anchor.paused);
+            assert(onchain_anchor.canceled == stream_anchor.canceled);
+            assert(onchain_anchor.deposited_amount == stream_anchor.deposited_amount);
+            assert(onchain_anchor.covered_until == stream_anchor.covered_until);
+            assert(onchain_anchor.last_paused_time == stream_anchor.last_paused_time);
+            assert(onchain_anchor.paused_interval == stream_anchor.paused_interval);
+            assert(onchain_anchor.withdrawn_amount == stream_anchor.withdrawn_amount);
+            assert(onchain_anchor.is_public == stream_anchor.is_public);
+            assert(onchain_anchor.created_timestamp == stream_anchor.created_timestamp);
+            assert(onchain_anchor.initialized == stream_anchor.initialized);
+        
+            let withdrawn_amount: u128 = onchain_anchor.withdrawn_amount + capped_withdrawable_amount;
+            let updated_stream = StreamAnchor {
+                ..onchain_anchor
+            };
+            updated_stream.withdrawn_amount = withdrawn_amount;
+            stream_anchors.set(stream_anchor.stream_id, updated_stream);
+
+            f_receiver_amount_transfer.run();
+        };
     }
 
     view fn get_stream_anchor(stream_id: field) -> StreamAnchor {
