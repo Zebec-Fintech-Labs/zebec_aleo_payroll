@@ -1,7 +1,7 @@
 import { configNameToField } from "../../sdk/hashing.ts";
 
 /** Payroll program on testnet. */
-export const PROGRAM_ID = "test_zebec_payroll.aleo";
+export const PROGRAM_ID = "test_zebec_payroll_v2.aleo";
 /** Testnet explorer API host (mapping reads, tx confirmation fallback). */
 export const HOST = "https://api.explorer.provable.com/v1";
 /** Freeze list of the IARC22 token program (compliance proofs). */

@@ -1,5 +1,76 @@
 import credits.aleo;
 
+struct MerkleProof {
+    siblings: [field; 16],
+    leaf_index: u32,
+}
+
+interface IARC22 {
+    record Token {
+        owner: address,
+        amount: u128,
+        ..
+    }
+
+    record ComplianceRecord {
+        owner: address,     // INVESTIGATOR_ADDRESS
+        amount: u128,
+        sender: address,    // ZERO_ADDRESS for mint paths
+        recipient: address, // ZERO_ADDRESS for burn paths
+        .. 
+    }
+
+    //=============================================================
+    //               APPROVAL FUNCTIONS
+    //=============================================================
+    fn approve_public(public spender: address, public amount: u128) -> Final;
+    fn unapprove_public(public spender: address, public amount: u128) -> Final;
+
+    //=============================================================
+    //               TRANSFER FUNCTIONS
+    //=============================================================
+    fn transfer_public(public recipient: address, public amount: u128) -> Final;
+    fn transfer_private(
+        private recipient: address,
+        private amount: u128,
+        private input_record: Token,
+        private sender_merkle_proofs: [MerkleProof; 2u32],
+    ) -> (ComplianceRecord, Token, Token, Final);
+    fn transfer_private_to_public(
+        public recipient: address,
+        public amount: u128,
+        private input_record: Token,
+        private sender_merkle_proofs: [MerkleProof; 2u32],
+    ) -> (ComplianceRecord, Token, Final);
+    fn transfer_public_to_private(recipient: address, public amount: u128) -> (
+        ComplianceRecord, Token, Final,
+    );
+    fn transfer_from_public(public owner: address, public recipient: address, public amount: u128) -> Final;
+    fn transfer_from_public_to_private(
+        public owner: address,
+        private recipient: address,
+        public amount: u128,
+    ) -> (ComplianceRecord, Token, Final);
+    fn transfer_public_as_signer(public recipient: address, public amount: u128) -> Final;
+
+    //=============================================================
+    //               JOIN/SPLIT FUNCTIONS
+    //=============================================================
+    fn join(input_1: Token, input_2: Token) -> Token;
+    fn split(input: Token, amount: u128) -> (Token, Token);
+
+    //=============================================================
+    //                VIEW FUNCTIONS
+    //=============================================================
+    view fn balance_of(account: address) -> u128;
+    view fn allowance(owner: address, spender: address) -> u128;
+    view fn supply() -> u128;
+    view fn max_supply() -> u128;
+    view fn decimals() -> u8;
+    view fn name() -> identifier;
+    view fn symbol() -> identifier;
+}
+
 // A single fee tier. `min_amount`/`max_amount` are USD values with
 // 6 decimals; `fee` is the fee in basis points charged for stream amounts
 // whose USD value falls in `(min_amount, max_amount]`.
@@ -105,8 +176,8 @@ const BPS_DENOMINATOR: u64 = 10_000u64;
 // Maximum number of fee tiers supported per payroll config.
 const MAX_FEE_TIERS: u8 = 8u8;
 
-// The 'test_zebec_payroll' program.
-program test_zebec_payroll.aleo {
+// The 'test_zebec_payroll_v2' program.
+program test_zebec_payroll_v2.aleo {
     // Payroll configurations, keyed by unique config name (a BHP256 hash of
     // the off-chain name).
     mapping payroll_config: field => PayrollConfig;
@@ -165,7 +236,7 @@ program test_zebec_payroll.aleo {
         fee_bps: u64,
         credit_input_record: credits.aleo::credits,
         token_input_record: dyn record,
-        sender_merkle_proofs: [iarc22::MerkleProof; 2]
+        sender_merkle_proofs: [MerkleProof; 2]
     ) -> Final {
         let signer: address = std::ctx::signer();
         let self_address: address = std::ctx::addr();
@@ -208,7 +279,7 @@ program test_zebec_payroll.aleo {
             credits.aleo::transfer_private_to_public(change2, config.fee_vault, stream_fee);
         
         let (comp, change, f_deposit_amount_transfer): (dyn record, dyn record, Final) =
-            iarc22::IARC22@(token_program)::transfer_private_to_public(
+            IARC22@(token_program)::transfer_private_to_public(
                 self_address, deposit_amount, token_input_record, sender_merkle_proofs
             );
 
@@ -427,12 +498,12 @@ program test_zebec_payroll.aleo {
         let sender_amount: u128 = stream_anchor.deposited_amount - total_withdrawable_amount;
 
         let (comp_a, token_a, f_sender_amount_transfer) 
-            = iarc22::IARC22@(ticket_record.token_program)::transfer_from_public_to_private(
+            = IARC22@(ticket_record.token_program)::transfer_from_public_to_private(
                 self_address, ticket_record.owner, sender_amount
             );
 
         let (comp_b, token_b, f_receiver_amount_transfer) 
-            = iarc22::IARC22@(ticket_record.token_program)::transfer_from_public_to_private(
+            = IARC22@(ticket_record.token_program)::transfer_from_public_to_private(
                 self_address, ticket_record.receiver, currently_withdrawable_amount
             );
         
@@ -513,7 +584,7 @@ program test_zebec_payroll.aleo {
         assert(total_withdrawable_amount <= stream_anchor.deposited_amount);
 
         let (comp, token, f_receiver_amount_transfer) 
-            = iarc22::IARC22@(ticket_record.token_program)::transfer_from_public_to_private(
+            = IARC22@(ticket_record.token_program)::transfer_from_public_to_private(
                 self_address, ticket_record.owner, capped_withdrawable_amount
             );
         
