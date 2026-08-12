@@ -194,6 +194,24 @@ const BPS_DENOMINATOR: u64 = 10_000u64;
 // Maximum number of fee tiers supported per payroll config.
 const MAX_FEE_TIERS: u8 = 8u8;
 
+// Maximum u64 value, widened to u128 for range checks on widened arithmetic.
+const U64_MAX: u128 = 18_446_744_073_709_551_615u128;
+
+// Maximum i64 value, widened to u128 for range checks on widened arithmetic.
+const I64_MAX: u128 = 9_223_372_036_854_775_807u128;
+
+// Fallback withdraw frequency (1 day) used as a guarded divisor when
+// auto-withdrawal is disabled (Leo flattens branches, so the division is
+// always evaluated).
+const DEFAULT_WITHDRAW_FREQUENCY: u64 = 86400u64;
+
+// Minimum auto-withdrawal frequency, in seconds.
+const MIN_WITHDRAW_FREQUENCY: u64 = 2u64;
+
+// Allowed discrepancy between a caller-provided `now` input and the block
+// timestamp, in seconds.
+const NOW_TOLERANCE: i64 = 5i64;
+
 // The 'test_zebec_payroll_v2' program.
 program test_zebec_payroll_v2.aleo {
     // Payroll configurations, keyed by unique config name (a BHP256 hash of
@@ -281,9 +299,9 @@ program test_zebec_payroll_v2.aleo {
         let auto_withdrawal_fee: u64 = 0u64;
         // Leo flattens `if` branches: the division below executes even when
         // auto-withdrawal is disabled, so the divisor must be guarded.
-        let safe_withdraw_frequency: u64 = params.withdraw_frequency > 0u64 ? params.withdraw_frequency : 86400u64; // 1 day by default;
+        let safe_withdraw_frequency: u64 = params.withdraw_frequency > 0u64 ? params.withdraw_frequency : DEFAULT_WITHDRAW_FREQUENCY;
         if (params.auto_withdrawable) {
-            assert(params.withdraw_frequency >= 2u64); // minimum is per 2 seconds
+            assert(params.withdraw_frequency >= MIN_WITHDRAW_FREQUENCY); // minimum is per 2 seconds
 
             let transaction_fee = (params.duration / safe_withdraw_frequency) * config.base_fee;
             auto_withdrawal_fee = config.platform_fee + transaction_fee;
@@ -546,7 +564,7 @@ program test_zebec_payroll_v2.aleo {
         return (sender_ticket, final {
             let real_now = std::ctx::block_timestamp();
             // Check: Validate now time discrepancy is within 5 seconds
-            assert((real_now - now).abs() <= 5i64);
+            assert((real_now - now).abs() <= NOW_TOLERANCE);
             // Check: Validate the streams exists
             assert(stream_anchors.contains(stream_id));
             let stream = stream_anchors.get(stream_id);
@@ -624,7 +642,7 @@ program test_zebec_payroll_v2.aleo {
 
         // Extra covered seconds bought by the optional `extra` pre-payment.
         let extra_seconds_u128: u128 = extra * stream_anchor.duration as u128 / ticket_record.full_amount;
-        assert(extra_seconds_u128 <= 9_223_372_036_854_775_807u128);
+        assert(extra_seconds_u128 <= I64_MAX);
         let extra_seconds: i64 = extra_seconds_u128 as i64;
 
         let token_input_record_amount: u128 = token_input_record.amount as u128;
@@ -644,7 +662,7 @@ program test_zebec_payroll_v2.aleo {
         return (updated_ticket, final {
             let real_now = std::ctx::block_timestamp();
             // Check: Validate now time discrepancy is within 5 seconds
-            assert((real_now - now).abs() <= 5i64);
+            assert((real_now - now).abs() <= NOW_TOLERANCE);
             // Check: Validate the streams exists
             assert(stream_anchors.contains(stream_id));
             let stream = stream_anchors.get(stream_id);
@@ -729,7 +747,7 @@ program test_zebec_payroll_v2.aleo {
         return (receiver_ticket, final {
             let real_now = std::ctx::block_timestamp();
             // Check: Validate now time discrepancy is within 5 seconds
-            assert((real_now - now).abs() <= 5i64);
+            assert((real_now - now).abs() <= NOW_TOLERANCE);
             // Check: Validate the streams exists
             assert(stream_anchors.contains(stream_id));
             let stream = stream_anchors.get(stream_id);
@@ -787,7 +805,7 @@ program test_zebec_payroll_v2.aleo {
         let auto_withdrawal_fee: u64 = 0u64;
         // Leo flattens `if` branches: the division below executes even when
         // auto-withdrawal is disabled, so the divisor must be guarded.
-        let safe_withdraw_frequency: u64 = params.withdraw_frequency > 0u64 ? params.withdraw_frequency : 86400u64; // 1 day by default;
+        let safe_withdraw_frequency: u64 = params.withdraw_frequency > 0u64 ? params.withdraw_frequency : DEFAULT_WITHDRAW_FREQUENCY;
         if (params.auto_withdrawable) {
             assert(params.withdraw_frequency > 0u64);
 
@@ -1032,7 +1050,7 @@ program test_zebec_payroll_v2.aleo {
         return final {
             let real_now = std::ctx::block_timestamp();
             // Check: Validate now time discrepancy is within 5 seconds
-            assert((real_now - now).abs() <= 5i64);
+            assert((real_now - now).abs() <= NOW_TOLERANCE);
             assert(stream_anchor.stream_id == payroll.stream_id);
             // Check: Validate the payroll exists
             assert(payrolls.contains(payroll.stream_id));
@@ -1126,7 +1144,7 @@ program test_zebec_payroll_v2.aleo {
         return final {
             let real_now = std::ctx::block_timestamp();
             // Check: Validate now time discrepancy is within 5 seconds
-            assert((real_now - now).abs() <= 5i64);
+            assert((real_now - now).abs() <= NOW_TOLERANCE);
 
             assert(payroll.stream_id == stream_anchor.stream_id);
             // Check: Validate the payroll exists
@@ -1336,8 +1354,8 @@ fn compute_stream_fee(
     let usd_value: u128 = (amount * token_price_usd as u128) / USD_PRICE_DECIMALS_SCALE as u128;
     let fee_usd: u128 = (usd_value * fee_bps as u128) / BPS_DENOMINATOR as u128;
     let stream_fee: u128 = (fee_usd * USD_PRICE_DECIMALS_SCALE as u128) / aleo_price_usd as u128;
-    assert(usd_value <= 18_446_744_073_709_551_615u128);
-    assert(stream_fee <= 18_446_744_073_709_551_615u128);
+    assert(usd_value <= U64_MAX);
+    assert(stream_fee <= U64_MAX);
     return (usd_value as u64, stream_fee as u64);
 }
 
