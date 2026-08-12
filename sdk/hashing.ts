@@ -1,6 +1,6 @@
 /**
  * BHP256 hashing helpers reproducing the on-chain `BHP256::hash_to_field`
- * calls in `test_zebec_payroll_v2.aleo` (mapping keys and the signed price message).
+ * calls in `test_zebec_payroll_v3.aleo` (mapping keys and the signed price message).
  *
  * Verified against `leo run`: hashing a struct's plaintext bits with the
  * default wasm `BHP256` hasher produces the identical field (see
