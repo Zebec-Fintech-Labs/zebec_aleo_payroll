@@ -259,6 +259,9 @@ program test_zebec_payroll_v2.aleo {
     record WithdrawerPayrollTicket {
         owner: address,
         ticket_type: u8, // = 2; withdrawer ticket
+        // Config (tenant) the stream was created under. Binds the ticket so
+        // only that config's withdrawer can auto-withdraw the stream.
+        config: field,
         full_amount: u128,
         stream_id: field,
         sender: address,
@@ -349,6 +352,7 @@ program test_zebec_payroll_v2.aleo {
         let withdrawer_ticket = WithdrawerPayrollTicket {
             owner: config.withdrawer,
             ticket_type: 2u8,
+            config: config.config_name,
             full_amount: params.amount,
             stream_id: params.stream_id,
             sender: signer,
@@ -748,6 +752,106 @@ program test_zebec_payroll_v2.aleo {
             let real_now = std::ctx::block_timestamp();
             // Check: Validate now time discrepancy is within 5 seconds
             assert((real_now - now).abs() <= NOW_TOLERANCE);
+            // Check: Validate the streams exists
+            assert(stream_anchors.contains(stream_id));
+            let stream = stream_anchors.get(stream_id);
+            // Check: Stream anchor matches the provided stream anchor
+            assert(stream.stream_id == stream_id);
+            assert(stream.stream_id == stream_anchor.stream_id);
+            assert(stream.start_time == stream_anchor.start_time);
+            assert(stream.duration == stream_anchor.duration);
+            assert(stream.paused == stream_anchor.paused);
+            assert(stream.canceled == stream_anchor.canceled);
+            assert(stream.deposited_amount == stream_anchor.deposited_amount);
+            assert(stream.covered_until == stream_anchor.covered_until);
+            assert(stream.last_paused_time == stream_anchor.last_paused_time);
+            assert(stream.paused_interval == stream_anchor.paused_interval);
+            assert(stream.withdrawn_amount == stream_anchor.withdrawn_amount);
+            assert(stream.is_public == stream_anchor.is_public);
+            assert(stream.created_timestamp == stream_anchor.created_timestamp);
+            assert(stream.initialized == stream_anchor.initialized);
+        
+            let withdrawn_amount: u128 = stream.withdrawn_amount + capped_withdrawable_amount;
+            let updated_stream = StreamAnchor {
+                ..stream
+            };
+            updated_stream.withdrawn_amount = withdrawn_amount;
+            stream_anchors.set(stream_id, updated_stream);
+
+            f_receiver_amount_transfer.run();
+        });
+    }
+
+    fn withdraw_stream_auto_private(
+        ticket_record: WithdrawerPayrollTicket, 
+        config: Config, 
+        stream_anchor: StreamAnchor, 
+        now: i64
+    ) -> (WithdrawerPayrollTicket, Final) {
+        let signer: address = std::ctx::signer();
+        let self_address: address = std::ctx::addr();
+
+        // Check: Signer is the config withdrawer and owns the withdrawer ticket
+        assert(signer == config.withdrawer);
+        assert(signer == ticket_record.owner);
+        // Check: The ticket belongs to this config (tenant binding)
+        assert(ticket_record.config == config.config_name);
+        // Check: Stream was created with auto-withdrawal enabled
+        assert(ticket_record.auto_withdrawable);
+        // Check: Stream has started
+        assert(stream_anchor.initialized);
+        assert(stream_anchor.start_time <= now);
+        assert(!stream_anchor.canceled);
+        assert(!stream_anchor.is_public);
+        // assert()
+
+        let effective_time: i64 = stream_anchor.paused ? stream_anchor.last_paused_time : now;
+        // Check: Stream has started
+        assert(stream_anchor.start_time <= effective_time);
+        // Check: Full amount is not withdrawn
+        assert(stream_anchor.withdrawn_amount < ticket_record.full_amount);
+        assert(stream_anchor.deposited_amount > stream_anchor.withdrawn_amount);
+
+        let (total_withdrawable_amount, currently_withdrawable_amount) = compute_withdrawable_amount(
+            effective_time,
+            stream_anchor.start_time,
+            stream_anchor.duration,
+            stream_anchor.paused_interval,
+            ticket_record.full_amount,
+            stream_anchor.withdrawn_amount
+        );
+
+        assert(total_withdrawable_amount <= ticket_record.full_amount);
+        let available_withdraw_amount: u128 = stream_anchor.deposited_amount - stream_anchor.withdrawn_amount;
+        // Buffer mode: the payout is capped at the funded remainder; amounts
+        // accrued beyond the deposit stay locked until the next top-up.
+        let capped_withdrawable_amount: u128 = currently_withdrawable_amount <= available_withdraw_amount ? currently_withdrawable_amount : available_withdraw_amount;
+        // Check: There is something to pay out (skip dust/zero auto-withdrawals)
+        assert(capped_withdrawable_amount > 0u128);
+
+        let (comp, token, f_receiver_amount_transfer) 
+            = IARC22@(ticket_record.token_program)::transfer_from_public_to_private(
+                self_address, ticket_record.receiver, capped_withdrawable_amount
+            );
+        
+        let stream_id = ticket_record.stream_id;
+        let withdrawer_ticket = WithdrawerPayrollTicket { ..ticket_record };
+        
+        return (withdrawer_ticket, final {
+            let real_now = std::ctx::block_timestamp();
+            // Check: Validate now time discrepancy is within 5 seconds
+            assert((real_now - now).abs() <= NOW_TOLERANCE);
+
+            // Check: Validate the config exists
+            assert(payroll_configs.contains(config.config_name));
+            let chain_config = payroll_configs.get(config.config_name);
+            // Check: Payroll config matches the provided config
+            assert(chain_config.admin == config.admin);
+            assert(chain_config.fee_vault == config.fee_vault);
+            assert(chain_config.withdrawer == config.withdrawer);
+            assert(chain_config.base_fee == config.base_fee);
+            assert(chain_config.platform_fee == config.platform_fee);
+
             // Check: Validate the streams exists
             assert(stream_anchors.contains(stream_id));
             let stream = stream_anchors.get(stream_id);
