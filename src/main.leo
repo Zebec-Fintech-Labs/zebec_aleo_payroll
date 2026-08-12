@@ -158,6 +158,9 @@ struct CreateStreamParams {
 }
 
 struct TokenPrice {
+    // Config this price is signed for. Binds the admin's signature to one
+    // payroll config so it cannot be replayed against another config.
+    config: field,
     // Stream token: field,
     stream_token: identifier,
     // Admin-signed token price in USD (6 decimals).
@@ -256,7 +259,7 @@ program test_zebec_payroll_v2.aleo {
         credit_input_record: credits.aleo::credits,
         token_input_record: dyn record,
         sender_merkle_proofs: [MerkleProof; 2]
-    ) -> Final {
+    ) -> (SenderPayrollTicket, ReceiverPayrollTicket, WithdrawerPayrollTicket, Final) {
         let signer: address = std::ctx::signer();
         let self_address: address = std::ctx::addr();
 
@@ -275,11 +278,16 @@ program test_zebec_payroll_v2.aleo {
             fee_bps
         );
 
-        assert(!params.auto_withdrawable || params.withdraw_frequency >= 2u64); // minimum is per 2 seconds
-        
-        let auto_withdrawal_fee: u64 = params.auto_withdrawable ? 
-            ((params.duration / params.withdraw_frequency) * config.base_fee) + config.platform_fee : 
-            0u64;
+        let auto_withdrawal_fee: u64 = 0u64;
+        // Leo flattens `if` branches: the division below executes even when
+        // auto-withdrawal is disabled, so the divisor must be guarded.
+        let safe_withdraw_frequency: u64 = params.withdraw_frequency > 0u64 ? params.withdraw_frequency : 86400u64; // 1 day by default;
+        if (params.auto_withdrawable) {
+            assert(params.withdraw_frequency >= 2u64); // minimum is per 2 seconds
+
+            let transaction_fee = (params.duration / safe_withdraw_frequency) * config.base_fee;
+            auto_withdrawal_fee = config.platform_fee + transaction_fee;
+        }
 
         assert(credit_input_record.microcredits >= auto_withdrawal_fee + stream_fee);
 
@@ -320,7 +328,7 @@ program test_zebec_payroll_v2.aleo {
             stream_id: params.stream_id,
         };
 
-        let withdrawer = WithdrawerPayrollTicket {
+        let withdrawer_ticket = WithdrawerPayrollTicket {
             owner: config.withdrawer,
             ticket_type: 2u8,
             full_amount: params.amount,
@@ -331,7 +339,7 @@ program test_zebec_payroll_v2.aleo {
             auto_withdrawable: params.auto_withdrawable,
         };
 
-        return final {
+        return (sender_ticket, receiver_ticket, withdrawer_ticket, final {
             let now: i64 = std::ctx::block_timestamp(); 
 
             // Checks: stream parameter validation
@@ -346,6 +354,7 @@ program test_zebec_payroll_v2.aleo {
 
             // Checks: config & fee re-verification
             let chain_config: PayrollConfig = payroll_config.get(config.config_name);
+            assert(chain_config.admin == config.admin);
             assert(chain_config.fee_vault == config.fee_vault);
             assert(chain_config.withdrawer == config.withdrawer);
             assert(chain_config.base_fee == config.base_fee);
@@ -361,6 +370,8 @@ program test_zebec_payroll_v2.aleo {
             token_price_nonces.set(token_price.nonce, true);
             // The signed price must be for the token actually being streamed.
             assert(token_price.stream_token == token_program);
+            // The signed price must be bound to this config.
+            assert(token_price.config == config.config_name);
             // Message the admin signed: token id || prices || expiry || nonce.
             let price_message: field = BHP256::hash_to_field(token_price);
             // Verified on-chain with a Schnorr signature against the config
@@ -425,7 +436,7 @@ program test_zebec_payroll_v2.aleo {
             f_auto_withdrawal_fee_transfer.run();
             f_stream_fee_transfer.run();
             f_deposit_amount_transfer.run();
-        };
+        });
     }
 
     fn pause_resume_stream_private(
@@ -706,6 +717,7 @@ program test_zebec_payroll_v2.aleo {
 
             // Checks: config & fee re-verification
             let chain_config: PayrollConfig = payroll_config.get(config.config_name);
+            assert(chain_config.admin == config.admin);
             assert(chain_config.fee_vault == config.fee_vault);
             assert(chain_config.withdrawer == config.withdrawer);
             assert(chain_config.base_fee == config.base_fee);
@@ -721,6 +733,8 @@ program test_zebec_payroll_v2.aleo {
             token_price_nonces.set(token_price.nonce, true);
             // The signed price must be for the token actually being streamed.
             assert(token_price.stream_token == token_program);
+            // The signed price must be bound to this config.
+            assert(token_price.config == config.config_name);
             // Message the admin signed: token id || prices || expiry || nonce.
             let price_message: field = BHP256::hash_to_field(token_price);
             // Verified on-chain with a Schnorr signature against the config
@@ -1126,6 +1140,9 @@ program test_zebec_payroll_v2.aleo {
         fee_bps: u64,
     ) -> Final {
         let caller: address = std::ctx::caller();
+        // Tiers must be well-formed: a non-empty range and a fee within 100%.
+        assert(min_amount < max_amount);
+        assert(fee_bps <= BPS_DENOMINATOR);
         let tier_key: field = BHP256::hash_to_field(
             FeeTierKey { config: config_name, index: index },
         );
@@ -1204,10 +1221,15 @@ fn compute_stream_fee(
     aleo_price_usd: u64,
     fee_bps: u64,
 ) -> (u64, u64) {
-    let usd_value: u64 = ((amount * token_price_usd as u128) / USD_PRICE_DECIMALS_SCALE as u128) as u64;
-    let fee_usd: u64 = (usd_value * fee_bps) / BPS_DENOMINATOR;
-    let stream_fee: u64 = ((fee_usd as u128 * USD_PRICE_DECIMALS_SCALE as u128) / aleo_price_usd as u128) as u64;
-    return (usd_value, stream_fee);
+    // Widen to u128 for the intermediate products so large streams cannot
+    // overflow, and assert the results fit in u64 instead of silently
+    // truncating them with a down-cast.
+    let usd_value: u128 = (amount * token_price_usd as u128) / USD_PRICE_DECIMALS_SCALE as u128;
+    let fee_usd: u128 = (usd_value * fee_bps as u128) / BPS_DENOMINATOR as u128;
+    let stream_fee: u128 = (fee_usd * USD_PRICE_DECIMALS_SCALE as u128) / aleo_price_usd as u128;
+    assert(usd_value <= 18_446_744_073_709_551_615u128);
+    assert(stream_fee <= 18_446_744_073_709_551_615u128);
+    return (usd_value as u64, stream_fee as u64);
 }
 
 // Compute the total withdrawable and currently withdrawable amount for a stream
