@@ -109,6 +109,8 @@ struct PayrollConfig {
 
 struct Payroll {
     stream_id: field,
+    // Config (tenant) the stream was created under.
+    config: field,
     sender: address,
     receiver: address,
     full_amount: u128,
@@ -234,6 +236,8 @@ program test_zebec_payroll_v2.aleo {
     record SenderPayrollTicket {
         owner: address,
         ticket_type: u8, // = 0; means sender ticket
+        // Config (tenant) the stream was created under.
+        config: field,
         stream_id: field,
         receiver: address,
         token_program: identifier,
@@ -248,6 +252,8 @@ program test_zebec_payroll_v2.aleo {
     record ReceiverPayrollTicket {
         owner: address,
         ticket_type: u8, // = 1; receiver ticket
+        // Config (tenant) the stream was created under.
+        config: field,
         sender: address,
         token_program: identifier,
         full_amount: u128,
@@ -329,6 +335,7 @@ program test_zebec_payroll_v2.aleo {
         let sender_ticket = SenderPayrollTicket {
             owner: signer,
             ticket_type: 0u8,
+            config: config.config_name,
             stream_id: params.stream_id,
             receiver: params.receiver,
             token_program: token_program,
@@ -342,6 +349,7 @@ program test_zebec_payroll_v2.aleo {
         let receiver_ticket = ReceiverPayrollTicket {
             owner: params.receiver,
             ticket_type: 1u8,
+            config: config.config_name,
             sender: signer,
             token_program: token_program,
             full_amount: params.amount,
@@ -1027,6 +1035,7 @@ program test_zebec_payroll_v2.aleo {
             // issuing sender/receiver/withdrawer ticket records.
             let payroll = Payroll {
                 stream_id: params.stream_id,
+                config: config.config_name,
                 sender: signer,
                 receiver: params.receiver,
                 full_amount: params.amount,
@@ -1161,6 +1170,7 @@ program test_zebec_payroll_v2.aleo {
             let onchain_payroll = payrolls.get(payroll.stream_id);
             // Check On chain payroll matches the provided payroll
             assert(onchain_payroll.stream_id == payroll.stream_id);
+            assert(onchain_payroll.config == payroll.config);
             assert(onchain_payroll.sender == payroll.sender);
             assert(onchain_payroll.receiver == payroll.receiver);
             assert(onchain_payroll.full_amount == payroll.full_amount);
@@ -1256,6 +1266,7 @@ program test_zebec_payroll_v2.aleo {
             let onchain_payroll = payrolls.get(payroll.stream_id);
             // Check On chain payroll matches the provided payroll
             assert(onchain_payroll.stream_id == payroll.stream_id);
+            assert(onchain_payroll.config == payroll.config);
             assert(onchain_payroll.sender == payroll.sender);
             assert(onchain_payroll.receiver == payroll.receiver);
             assert(onchain_payroll.full_amount == payroll.full_amount);
