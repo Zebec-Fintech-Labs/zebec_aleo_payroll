@@ -95,7 +95,7 @@ struct WhitelistKey {
 }
 
 // Program configuration. Multiple config live in this program's
-// `payroll_config` mapping, each under a unique config name. Fee tiers and
+// `payroll_configs` mapping, each under a unique config name. Fee tiers and
 // whitelisted tokens are stored per config in separate mappings (see
 // `FeeTierKey` / `WhitelistKey`).
 struct PayrollConfig {
@@ -216,7 +216,7 @@ const NOW_TOLERANCE: i64 = 5i64;
 program test_zebec_payroll_v2.aleo {
     // Payroll configurations, keyed by unique config name (a BHP256 hash of
     // the off-chain name).
-    mapping payroll_config: field => PayrollConfig;
+    mapping payroll_configs: field => PayrollConfig;
     // Fee tiers per config, keyed by BHP256 hash of `FeeTierKey`, looked up
     // by USD stream value.
     mapping fee_tiers: field => FeeTier;
@@ -371,7 +371,7 @@ program test_zebec_payroll_v2.aleo {
             assert(fee_bps <= BPS_DENOMINATOR);
 
             // Checks: config & fee re-verification
-            let chain_config: PayrollConfig = payroll_config.get(config.config_name);
+            let chain_config: PayrollConfig = payroll_configs.get(config.config_name);
             assert(chain_config.admin == config.admin);
             assert(chain_config.fee_vault == config.fee_vault);
             assert(chain_config.withdrawer == config.withdrawer);
@@ -839,7 +839,7 @@ program test_zebec_payroll_v2.aleo {
             assert(fee_bps <= BPS_DENOMINATOR);
 
             // Checks: config & fee re-verification
-            let chain_config: PayrollConfig = payroll_config.get(config.config_name);
+            let chain_config: PayrollConfig = payroll_configs.get(config.config_name);
             assert(chain_config.admin == config.admin);
             assert(chain_config.fee_vault == config.fee_vault);
             assert(chain_config.withdrawer == config.withdrawer);
@@ -1216,8 +1216,8 @@ program test_zebec_payroll_v2.aleo {
         let caller: address = std::ctx::caller();
         return final {
             // Config names are unique: initialization fails if one exists.
-            assert(!payroll_config.contains(config_name));
-            payroll_config.set(
+            assert(!payroll_configs.contains(config_name));
+            payroll_configs.set(
                 config_name,
                 PayrollConfig {
                     admin: caller,
@@ -1241,10 +1241,10 @@ program test_zebec_payroll_v2.aleo {
     ) -> Final {
         let caller: address = std::ctx::caller();
         return final {
-            let config: PayrollConfig = payroll_config.get(config_name);
+            let config: PayrollConfig = payroll_configs.get(config_name);
             assert(config.admin == caller);
             assert(config.initialized);
-            payroll_config.set(
+            payroll_configs.set(
                 config_name,
                 PayrollConfig {
                     admin: config.admin,
@@ -1274,7 +1274,7 @@ program test_zebec_payroll_v2.aleo {
             FeeTierKey { config: config_name, index: index },
         );
         return final {
-            let config: PayrollConfig = payroll_config.get(config_name);
+            let config: PayrollConfig = payroll_configs.get(config_name);
             assert(config.admin == caller);
             assert(index < MAX_FEE_TIERS);
             fee_tiers.set(
@@ -1301,15 +1301,15 @@ program test_zebec_payroll_v2.aleo {
         );
 
         return final {
-            let config: PayrollConfig = payroll_config.get(config_name);
+            let config: PayrollConfig = payroll_configs.get(config_name);
             assert(config.admin == caller);
             whitelisted_token_programs.set(whitelist_key, allowed);
         };
     }
 
     view fn get_payroll_config(config_name: field) -> PayrollConfig {
-        assert(payroll_config.contains(config_name));
-        return payroll_config.get(config_name);
+        assert(payroll_configs.contains(config_name));
+        return payroll_configs.get(config_name);
     }
 
     view fn get_fee_tier(config_name: field, index: u8) -> FeeTier {
