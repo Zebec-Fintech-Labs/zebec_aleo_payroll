@@ -972,7 +972,7 @@ program test_zebec_payroll_v2.aleo {
         assert(stream_anchor.initialized);
         assert(stream_anchor.start_time <= now);
         assert(!stream_anchor.canceled);
-        assert(!stream_anchor.is_public);
+        assert(stream_anchor.is_public);
 
         let effective_time: i64 = stream_anchor.paused ? stream_anchor.last_paused_time : now;
         // Check: Stream has started
@@ -1039,14 +1039,19 @@ program test_zebec_payroll_v2.aleo {
             assert(onchain_anchor.initialized == stream_anchor.initialized);
         
             let withdrawn_amount: u128 = onchain_anchor.withdrawn_amount + capped_withdrawable_amount;
-            let updated_stream = StreamAnchor {
+            let updated_anchor = StreamAnchor {
                 ..onchain_anchor
             };
-            updated_stream.withdrawn_amount = withdrawn_amount;
-            stream_anchors.set(stream_anchor.stream_id, updated_stream);
+            updated_anchor.withdrawn_amount = withdrawn_amount;
+            stream_anchors.set(stream_anchor.stream_id, updated_anchor);
 
             f_receiver_amount_transfer.run();
         };
+    }
+
+    view fn get_payroll(stream_id: field) -> Payroll {
+        assert(payrolls.contains(stream_id));
+        return payrolls.get(stream_id);
     }
 
     view fn get_stream_anchor(stream_id: field) -> StreamAnchor {
