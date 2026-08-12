@@ -78,6 +78,11 @@ export interface Config {
 
 /** Leo `TokenPrice` struct. Prices are USD with 6 decimals. */
 export interface TokenPrice {
+  /**
+   * Config name (`field`) this price is signed for. Binds the admin's
+   * signature to one payroll config so it cannot be replayed elsewhere.
+   */
+  config: string | bigint;
   /** Identifier of the stream token program. */
   streamToken: string;
   streamTokenPriceUsd: bigint;

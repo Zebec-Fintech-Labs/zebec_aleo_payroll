@@ -12,7 +12,7 @@ import {
 // see the scratch program used during development. If these match, the
 // off-chain BHP256 hashing reproduces `BHP256::hash_to_field` exactly.
 const PRICE_HASH =
-  "3398728132685942447990869490184395134716745240104728294043752163513757586075field";
+  "2465286061713934066083951265206464108512855460089046687757762326215251262203field";
 const TIER_KEY =
   "4280435061793654878309538122108291005136850793721184370576372014297830104823field";
 const WHITELIST_KEY =
@@ -20,6 +20,7 @@ const WHITELIST_KEY =
 
 // console.log("whitelistkey", whitelistKey("12345", "my_token"));
 // console.log("pricehash", tokenPriceMessage({
+//   config: 12345n,
 //   streamToken: "token",
 //   streamTokenPriceUsd: 1_000_000n,
 //   aleoPriceUsd: 500_000n,
@@ -30,6 +31,7 @@ const WHITELIST_KEY =
 describe("hashing (known on-chain vectors)", () => {
   it("hashes a TokenPrice exactly like BHP256::hash_to_field on-chain", () => {
     const message = tokenPriceMessage({
+      config: 12345n,
       streamToken: "token",
       streamTokenPriceUsd: 1_000_000n,
       aleoPriceUsd: 500_000n,

@@ -156,6 +156,7 @@ export class WalletPayrollService {
     const depositAmount = params.canTopup ? params.initialBufferAmount : params.amount;
     const config = await this.getConfigInput();
     const tokenPrice: TokenPrice = {
+      config: CONFIG_NAME,
       streamToken: TOKEN_PROGRAM,
       streamTokenPriceUsd: TOKEN_PRICE_USD,
       aleoPriceUsd: ALEO_PRICE_USD,

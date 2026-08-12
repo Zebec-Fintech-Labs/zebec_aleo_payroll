@@ -66,7 +66,8 @@ export function configToPlaintext(c: Config): string {
 /** Serialize a `TokenPrice` struct to its Leo plaintext literal. */
 export function tokenPriceToPlaintext(tp: TokenPrice): string {
   return (
-    `{ stream_token: ${identLiteral(tp.streamToken)}, ` +
+    `{ config: ${fieldLiteral(tp.config)}, ` +
+    `stream_token: ${identLiteral(tp.streamToken)}, ` +
     `stream_token_price_usd: ${tp.streamTokenPriceUsd}u64, ` +
     `aleo_price_usd: ${tp.aleoPriceUsd}u64, ` +
     `price_expiry: ${tp.priceExpiry}i64, nonce: ${fieldLiteral(tp.nonce)} }`

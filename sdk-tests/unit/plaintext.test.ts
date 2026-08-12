@@ -82,6 +82,7 @@ describe("struct serializers", () => {
     Plaintext.fromString(config).free();
 
     const price = tokenPriceToPlaintext({
+      config: 12345n,
       streamToken: "token",
       streamTokenPriceUsd: 1_000_000n,
       aleoPriceUsd: 500_000n,

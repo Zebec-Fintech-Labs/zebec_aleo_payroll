@@ -10,6 +10,7 @@ const TEST_PRIVATE_KEY =
   "APrivateKey1zkp8CZNn3yeCseEtxuVPbDCwSyhGW6yZKUYKfgXmcpoGPWH";
 
 const tokenPrice: TokenPrice = {
+  config: 12345n,
   streamToken: "token",
   streamTokenPriceUsd: 1_000_000n,
   aleoPriceUsd: 500_000n,

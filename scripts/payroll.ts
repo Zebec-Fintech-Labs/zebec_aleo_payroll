@@ -160,6 +160,7 @@ async function resolveFeeBps(usdValue: bigint): Promise<bigint> {
 /** Build a fresh admin-signed `TokenPrice` attestation. */
 function createSignedTokenPrice(): { tokenPrice: TokenPrice; signature: string } {
     const tokenPrice: TokenPrice = {
+        config: CONFIG_NAME,
         streamToken: TOKEN_PROGRAM,
         streamTokenPriceUsd: TOKEN_PRICE_USD,
         aleoPriceUsd: ALEO_PRICE_USD,
