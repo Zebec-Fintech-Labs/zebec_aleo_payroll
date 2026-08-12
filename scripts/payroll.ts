@@ -18,7 +18,7 @@
  * - RECEIVER_PRIVATE_KEY (required): employee who withdraws.
  */
 
-import { initThreadPool, SealanceMerkleTree } from "@provablehq/sdk/testnet.js";
+import { initThreadPool, RecordPlaintext, SealanceMerkleTree } from "@provablehq/sdk/testnet.js";
 import dotenv from "dotenv";
 import path from "node:path";
 import * as fs from "node:fs";
@@ -220,17 +220,19 @@ async function createStream(): Promise<string | bigint> {
         feeBps,
         proofs,
         {
-            priorityFee: 0.1, creditRecord: `{
+            priorityFee: 0.1,
+            creditRecord: RecordPlaintext.fromString(`{
   owner: aleo12czxn500cyj9a7lweuft6r4rrckthfck5k8440qh7atgrnt5kupqsfh038.private,
   microcredits: 10000000u64.private,
   _nonce: 6410260858307819024593913311999508957203522779225348165403325458147180369361group.public,
   _version: 1u8.public
-}`, tokenRecord: `{
+}`), tokenRecord: RecordPlaintext.fromString(`{
   owner: aleo12czxn500cyj9a7lweuft6r4rrckthfck5k8440qh7atgrnt5kupqsfh038.private,
   amount: 40000000u128.private,
   _nonce: 5129322304556379667216924448175967718654626044730865730388167874744975697882group.public,
   _version: 1u8.public
-}` },
+}`)
+        },
     );
     console.log("Create stream transaction ID:", txId);
     await waitForConfirmation(txId);

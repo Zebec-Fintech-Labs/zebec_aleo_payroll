@@ -8,6 +8,8 @@
  * bits in declaration order, so reordering would change every derived key.
  */
 
+import { Field, Plaintext } from "@provablehq/sdk/testnet.js";
+
 import type {
   Config,
   CreateStreamParams,
@@ -20,11 +22,10 @@ import type {
 
 /** Normalize a field value to its canonical literal form (`"123field"`). */
 export function fieldLiteral(value: string | bigint | number): string {
-  if (typeof value === "bigint" || typeof value === "number") {
-    return `${value}field`;
-  }
-  const trimmed = value.trim();
-  return trimmed.endsWith("field") ? trimmed : `${trimmed}field`;
+  const trimmed = (typeof value === "string" ? value : `${value}`).trim();
+  const literal = trimmed.endsWith("field") ? trimmed : `${trimmed}field`;
+  // Validate with the snarkVM parser and return its canonical form.
+  return Field.fromString(literal).toString();
 }
 
 /** Render a bare identifier literal (e.g. `my_token`) using Leo's single-quote syntax. */
@@ -40,9 +41,18 @@ function boolLiteral(value: boolean): string {
   return value ? "true" : "false";
 }
 
+/**
+ * Validate a serialized plaintext value with the snarkVM parser, returning
+ * the original single-line text unchanged.
+ */
+function validated(text: string): string {
+  Plaintext.fromString(text).free();
+  return text;
+}
+
 /** Serialize a `CreateStreamParams` struct to its Leo plaintext literal. */
 export function createStreamParamsToPlaintext(p: CreateStreamParams): string {
-  return (
+  return validated(
     `{ receiver: ${p.receiver}, stream_id: ${fieldLiteral(p.streamId)}, ` +
     `amount: ${p.amount}u128, start_time: ${p.startTime}i64, ` +
     `duration: ${p.duration}u64, is_cancelable: ${boolLiteral(p.isCancelable)}, ` +
@@ -56,7 +66,7 @@ export function createStreamParamsToPlaintext(p: CreateStreamParams): string {
 
 /** Serialize a `Config` struct to its Leo plaintext literal. */
 export function configToPlaintext(c: Config): string {
-  return (
+  return validated(
     `{ config_name: ${fieldLiteral(c.configName)}, admin: ${c.admin}, ` +
     `fee_vault: ${c.feeVault}, withdrawer: ${c.withdrawer}, ` +
     `base_fee: ${c.baseFee}u64, platform_fee: ${c.platformFee}u64 }`
@@ -65,7 +75,7 @@ export function configToPlaintext(c: Config): string {
 
 /** Serialize a `TokenPrice` struct to its Leo plaintext literal. */
 export function tokenPriceToPlaintext(tp: TokenPrice): string {
-  return (
+  return validated(
     `{ config: ${fieldLiteral(tp.config)}, ` +
     `stream_token: ${identLiteral(tp.streamToken)}, ` +
     `stream_token_price_usd: ${tp.streamTokenPriceUsd}u64, ` +
@@ -76,7 +86,7 @@ export function tokenPriceToPlaintext(tp: TokenPrice): string {
 
 /** Serialize a `StreamAnchor` struct to its Leo plaintext literal. */
 export function streamAnchorToPlaintext(a: StreamAnchor): string {
-  return (
+  return validated(
     `{ stream_id: ${fieldLiteral(a.streamId)}, start_time: ${a.startTime}i64, ` +
     `duration: ${a.duration}u64, paused: ${boolLiteral(a.paused)}, ` +
     `canceled: ${boolLiteral(a.canceled)}, canceled_at: ${a.canceledAt}i64, ` +
@@ -97,12 +107,12 @@ export function merkleProofToPlaintext(proof: MerkleProof): string {
     throw new Error(`MerkleProof needs exactly 16 siblings, got ${proof.siblings.length}`);
   }
   const siblings = proof.siblings.map((s) => fieldLiteral(s)).join(", ");
-  return `{ siblings: [${siblings}], leaf_index: ${proof.leafIndex}u32 }`;
+  return validated(`{ siblings: [${siblings}], leaf_index: ${proof.leafIndex}u32 }`);
 }
 
 /** Serialize the `[iarc22::MerkleProof; 2]` array used by token transfers. */
 export function merkleProofsToPlaintext(proofs: [MerkleProof, MerkleProof]): string {
-  return `[${merkleProofToPlaintext(proofs[0])}, ${merkleProofToPlaintext(proofs[1])}]`;
+  return validated(`[${merkleProofToPlaintext(proofs[0])}, ${merkleProofToPlaintext(proofs[1])}]`);
 }
 
 // =========================================================================
