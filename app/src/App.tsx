@@ -94,7 +94,7 @@ export default function App() {
       network={Network.TESTNET}
       decryptPermission={DecryptPermission.UponRequest}
       programs={[PROGRAM_ID, CREDITS_PROGRAM_ID, TOKEN_PROGRAM_ID]}
-      autoConnect={false}
+      autoConnect={true}
       onError={(error) => console.error(error)}
     >
       <WalletModalProvider>
