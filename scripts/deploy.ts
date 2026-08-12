@@ -38,7 +38,7 @@ programManager.setAccount(account);
 // const imports = await networkClient.getProgramImports(PROGRAM_SOURCE);
 // console.log("Program imports:", imports);
 // Define a fee to pay to deploy the program
-const fee = 1;
+const fee = 2;
 // Build a deployment transaction for the program.
 const tx = await programManager.buildDeploymentTransaction(PROGRAM_SOURCE, fee, false);
 console.log("Transaction ID:", tx.id());
