@@ -36,13 +36,14 @@ export {
 
 export {
   computeStreamFee,
+  computeTopupAmount,
   computeWithdrawableAmount,
   nowSeconds,
   USD_PRICE_DECIMALS_SCALE,
   BPS_DENOMINATOR,
   MAX_FEE_TIERS,
 } from "./math.js";
-export type { StreamFee, WithdrawableAmounts } from "./math.js";
+export type { StreamFee, TopupAmount, WithdrawableAmounts } from "./math.js";
 
 export { signTokenPrice, verifyTokenPriceSignature } from "./signing.js";
 

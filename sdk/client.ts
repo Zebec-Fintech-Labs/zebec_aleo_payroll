@@ -12,7 +12,7 @@ import {
 } from "@provablehq/sdk/testnet.js";
 
 import { feeTierKey, whitelistKey } from "./hashing.js";
-import { computeStreamFee, computeWithdrawableAmount, nowSeconds } from "./math.js";
+import { computeStreamFee, computeTopupAmount, computeWithdrawableAmount, nowSeconds } from "./math.js";
 import {
   configToPlaintext,
   createStreamParamsToPlaintext,
@@ -198,6 +198,47 @@ export class PayrollService {
     const anchor = await this.getStreamAnchor(streamId);
     const inputs = [ticketRecord, streamAnchorToPlaintext(anchor), `${now}i64`];
     return this.execute("withdraw_private", inputs, options, await this.ticketTokenImport(ticketRecord));
+  }
+
+  /**
+   * Execute `topup_stream_private`: pay the accrued debt of a buffer-mode
+   * stream plus `extra` pre-paid coverage. Sender only — the sender ticket
+   * record, on-chain anchor, and a covering token record are resolved
+   * automatically when omitted. No ALEO fee is charged on top-ups.
+   */
+  async topupStream(
+    streamId: string | bigint,
+    extra: bigint,
+    merkleProofs: [MerkleProof, MerkleProof],
+    now: bigint = nowSeconds(),
+    options: ExecuteOptions & {
+      ticket?: string | RecordPlaintext;
+      tokenRecord?: string | RecordPlaintext;
+    } = {},
+  ): Promise<string> {
+    const ticketRecord =
+      options.ticket?.toString() ?? (await this.findTicket("SenderPayrollTicket", streamId));
+    const anchor = await this.getStreamAnchor(streamId);
+    const tokenMatch = /token_program:\s*([a-zA-Z0-9_]+)/.exec(ticketRecord);
+    const amountMatch = /full_amount:\s*(\d+)u128/.exec(ticketRecord);
+    if (tokenMatch === null || amountMatch === null) {
+      throw new Error("could not parse token_program / full_amount from the ticket record");
+    }
+    const tokenProgramId = `${tokenMatch[1]}.aleo`;
+    const { topupAmount } = computeTopupAmount(anchor, BigInt(amountMatch[1]!), now, extra);
+    const tokenRecord =
+      options.tokenRecord?.toString() ?? (await this.findToken(tokenProgramId, topupAmount));
+    const inputs = [
+      ticketRecord,
+      streamAnchorToPlaintext(anchor),
+      `${extra}u128`,
+      `${now}i64`,
+      tokenRecord,
+      merkleProofsToPlaintext(merkleProofs),
+    ];
+    return this.execute("topup_stream_private", inputs, options, {
+      [tokenProgramId]: await this.loadProgramSource(tokenProgramId),
+    });
   }
 
   // =======================================================================

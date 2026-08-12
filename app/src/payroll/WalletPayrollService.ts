@@ -13,6 +13,7 @@ import type { AleoDeployment } from "@provablehq/aleo-wallet-standard";
 import { feeTierKey, whitelistKey } from "../../../sdk/hashing.ts";
 import {
   computeStreamFee,
+  computeTopupAmount,
   computeWithdrawableAmount,
   MAX_FEE_TIERS,
   nowSeconds,
@@ -235,6 +236,38 @@ export class WalletPayrollService {
     const anchor = await this.getStreamAnchor(streamId);
     const inputs = [ticket, streamAnchorToPlaintext(anchor), `${nowSeconds()}i64`];
     return this.execute("withdraw_private", inputs, fee);
+  }
+
+  /**
+   * Execute `topup_stream_private`: pay the accrued debt of a buffer-mode
+   * stream plus `extra` pre-paid coverage. Sender only; no admin key or
+   * price attestation needed (top-ups carry no platform fee).
+   */
+  async topupStream(
+    streamId: string | bigint,
+    extra: bigint,
+    fee: number = DEFAULT_FEE,
+  ): Promise<string> {
+    const now = nowSeconds();
+    const ticket = await this.findTicket("SenderPayrollTicket", streamId);
+    const anchor = await this.getStreamAnchor(streamId);
+    const fullAmount = recordAmount(ticket, "full_amount");
+    if (fullAmount === undefined) {
+      throw new Error("could not parse full_amount from the ticket record");
+    }
+    const { topupAmount } = computeTopupAmount(anchor, fullAmount, now, extra);
+    console.log("topup amount (debt + extra):", topupAmount);
+    const tokenRecord = await this.findToken(topupAmount);
+    const merkleProofs = await this.getComplianceProofs();
+    const inputs = [
+      ticket,
+      streamAnchorToPlaintext(anchor),
+      `${extra}u128`,
+      `${now}i64`,
+      tokenRecord,
+      merkleProofs,
+    ];
+    return this.execute("topup_stream_private", inputs, fee);
   }
 
   // =======================================================================

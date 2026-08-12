@@ -523,6 +523,9 @@ program test_zebec_payroll_v2.aleo {
         );
 
         assert(total_withdrawable_amount <= ticket_record.full_amount);
+        // Cancel settles the whole stream, so full funding is required: on an
+        // underfunded buffer stream the sender must clear the debt with a
+        // top-up before cancelling.
         assert(total_withdrawable_amount <= stream_anchor.deposited_amount);
 
         let sender_amount: u128 = stream_anchor.deposited_amount - total_withdrawable_amount;
@@ -575,6 +578,107 @@ program test_zebec_payroll_v2.aleo {
         });
     }
 
+    // Top up a buffer-mode private stream (debt model). Sender only: owning
+    // the SenderPayrollTicket record is the authorization. Debt is measured
+    // in stream time (pause-aware), mirroring the accrual logic:
+    //   stream_time_now = effective_time - paused_interval
+    //   debt = max(0, stream_time_now - covered_until) * full_amount / duration
+    // The top-up pays the accrued debt plus an optional `extra` pre-payment;
+    // `extra` buys extra * duration / full_amount additional covered seconds.
+    fn topup_stream_private(
+        ticket_record: SenderPayrollTicket,
+        stream_anchor: StreamAnchor,
+        extra: u128,
+        now: i64,
+        token_input_record: dyn record,
+        sender_merkle_proofs: [MerkleProof; 2]
+    ) -> (SenderPayrollTicket, Final) {
+        let signer: address = std::ctx::signer();
+        let self_address: address = std::ctx::addr();
+
+        // Check: Signer is the sender payroll ticket owner
+        assert(signer == ticket_record.owner);
+        // Check: Stream was created with top-up enabled
+        assert(ticket_record.can_topup);
+        assert(stream_anchor.initialized);
+        assert(stream_anchor.stream_id == ticket_record.stream_id);
+        assert(!stream_anchor.canceled);
+        assert(!stream_anchor.is_public);
+        // Check: Buffer-mode streams have a non-zero covered_until
+        assert(stream_anchor.covered_until > 0i64);
+
+        let effective_time: i64 = stream_anchor.paused ? stream_anchor.last_paused_time : now;
+        // Check: Stream has started
+        assert(stream_anchor.start_time <= effective_time);
+        // Check: Stream has not ended
+        let elapsed_duration: u64 = (effective_time as u64 - stream_anchor.start_time as u64) - stream_anchor.paused_interval;
+        assert(elapsed_duration < stream_anchor.duration);
+
+        // Debt in stream time: paused durations do not accrue debt.
+        let stream_time_now: i64 = effective_time - stream_anchor.paused_interval as i64;
+        let debt_seconds: i64 = stream_time_now > stream_anchor.covered_until ? stream_time_now - stream_anchor.covered_until : 0i64;
+        let debt_amount: u128 = debt_seconds as u128 * ticket_record.full_amount / stream_anchor.duration as u128;
+
+        let topup_amount: u128 = debt_amount + extra;
+        assert(topup_amount > 0u128);
+
+        // Extra covered seconds bought by the optional `extra` pre-payment.
+        let extra_seconds_u128: u128 = extra * stream_anchor.duration as u128 / ticket_record.full_amount;
+        assert(extra_seconds_u128 <= 9_223_372_036_854_775_807u128);
+        let extra_seconds: i64 = extra_seconds_u128 as i64;
+
+        let token_input_record_amount: u128 = token_input_record.amount as u128;
+        assert(token_input_record_amount >= topup_amount);
+
+        // Pull the top-up into the program's public balance (same pattern as
+        // the create_stream_private deposit).
+        let (comp, change, f_topup_transfer): (dyn record, dyn record, Final) =
+            IARC22@(ticket_record.token_program)::transfer_private_to_public(
+                self_address, topup_amount, token_input_record, sender_merkle_proofs
+            );
+
+        let stream_id = ticket_record.stream_id;
+        let updated_ticket = SenderPayrollTicket { ..ticket_record };
+        updated_ticket.topup_count = ticket_record.topup_count + 1u64;
+
+        return (updated_ticket, final {
+            let real_now = std::ctx::block_timestamp();
+            // Check: Validate now time discrepancy is within 5 seconds
+            assert((real_now - now).abs() <= 5i64);
+            // Check: Validate the streams exists
+            assert(stream_anchors.contains(stream_id));
+            let stream = stream_anchors.get(stream_id);
+            // Check: Stream anchor matches the provided stream anchor
+            assert(stream.stream_id == stream_id);
+            assert(stream.stream_id == stream_anchor.stream_id);
+            assert(stream.start_time == stream_anchor.start_time);
+            assert(stream.duration == stream_anchor.duration);
+            assert(stream.paused == stream_anchor.paused);
+            assert(stream.canceled == stream_anchor.canceled);
+            assert(stream.deposited_amount == stream_anchor.deposited_amount);
+            assert(stream.covered_until == stream_anchor.covered_until);
+            assert(stream.last_paused_time == stream_anchor.last_paused_time);
+            assert(stream.paused_interval == stream_anchor.paused_interval);
+            assert(stream.withdrawn_amount == stream_anchor.withdrawn_amount);
+            assert(stream.is_public == stream_anchor.is_public);
+            assert(stream.created_timestamp == stream_anchor.created_timestamp);
+            assert(stream.initialized == stream_anchor.initialized);
+
+            let updated_stream = StreamAnchor {
+                ..stream
+            };
+            updated_stream.deposited_amount = stream.deposited_amount + topup_amount;
+            // Advance covered_until monotonically: a debt-only topup
+            // (extra == 0) must not erase forward coverage that was already
+            // purchased in a prior topup.
+            let coverage_base: i64 = stream.covered_until > stream_time_now ? stream.covered_until : stream_time_now;
+            updated_stream.covered_until = coverage_base + extra_seconds;
+            stream_anchors.set(stream_id, updated_stream);
+
+            f_topup_transfer.run();
+        });
+    }
+
     fn withdraw_stream_private(
         ticket_record: ReceiverPayrollTicket,
         stream_anchor: StreamAnchor,
@@ -610,8 +714,9 @@ program test_zebec_payroll_v2.aleo {
 
         assert(total_withdrawable_amount <= ticket_record.full_amount);
         let available_withdraw_amount: u128 = stream_anchor.deposited_amount - stream_anchor.withdrawn_amount;
+        // Buffer mode: the payout is capped at the funded remainder; amounts
+        // accrued beyond the deposit stay locked until the next top-up.
         let capped_withdrawable_amount: u128 = currently_withdrawable_amount <= available_withdraw_amount ? currently_withdrawable_amount : available_withdraw_amount;
-        assert(total_withdrawable_amount <= stream_anchor.deposited_amount);
 
         let (comp, token, f_receiver_amount_transfer) 
             = IARC22@(ticket_record.token_program)::transfer_from_public_to_private(
@@ -906,6 +1011,9 @@ program test_zebec_payroll_v2.aleo {
         );
 
         assert(total_withdrawable_amount <= payroll.full_amount);
+        // Cancel settles the whole stream, so full funding is required: on an
+        // underfunded buffer stream the sender must clear the debt with a
+        // top-up before cancelling.
         assert(total_withdrawable_amount <= stream_anchor.deposited_amount);
 
         let sender_amount: u128 = stream_anchor.deposited_amount - total_withdrawable_amount;
@@ -1006,8 +1114,9 @@ program test_zebec_payroll_v2.aleo {
 
         assert(total_withdrawable_amount <= payroll.full_amount);
         let available_withdraw_amount: u128 = stream_anchor.deposited_amount - stream_anchor.withdrawn_amount;
+        // Buffer mode: the payout is capped at the funded remainder; amounts
+        // accrued beyond the deposit stay locked until the next top-up.
         let capped_withdrawable_amount: u128 = currently_withdrawable_amount <= available_withdraw_amount ? currently_withdrawable_amount : available_withdraw_amount;
-        assert(total_withdrawable_amount <= stream_anchor.deposited_amount);
 
         let f_receiver_amount_transfer: Final 
             = IARC22@(payroll.token_program)::transfer_from_public(

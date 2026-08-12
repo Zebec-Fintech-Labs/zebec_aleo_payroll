@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "mocha";
 
-import { computeStreamFee, computeWithdrawableAmount } from "../../sdk/math.js";
+import { computeStreamFee, computeTopupAmount, computeWithdrawableAmount } from "../../sdk/math.js";
 
 describe("computeStreamFee", () => {
   it("computes usd value and fee like the on-chain function", () => {
@@ -65,5 +65,59 @@ describe("computeWithdrawableAmount", () => {
 
   it("throws on non-positive duration", () => {
     assert.throws(() => computeWithdrawableAmount(1n, 0n, 0n, 0n, FULL, 0n));
+  });
+});
+
+describe("computeTopupAmount", () => {
+  const DURATION = 100n;
+  const FULL = 10_000n; // 100 tokens per stream second
+  const anchor = {
+    duration: DURATION,
+    paused: false,
+    lastPausedTime: 0n,
+    pausedInterval: 0n,
+    coveredUntil: 1_050n, // covered through stream second 50
+  };
+
+  it("has no debt while stream time is within the covered window", () => {
+    assert.deepEqual(computeTopupAmount(anchor, FULL, 1_050n, 0n), {
+      debtAmount: 0n,
+      topupAmount: 0n,
+      extraSeconds: 0n,
+    });
+  });
+
+  it("accrues debt for stream time beyond covered_until", () => {
+    // 20 stream seconds past coverage at 100 tokens/sec.
+    assert.deepEqual(computeTopupAmount(anchor, FULL, 1_070n, 0n), {
+      debtAmount: 2_000n,
+      topupAmount: 2_000n,
+      extraSeconds: 0n,
+    });
+  });
+
+  it("freezes debt while the stream is paused", () => {
+    // Paused at t=1060 with 10s of banked pause: stream time is 1050 -> no debt
+    // even though wall clock is far ahead.
+    const paused = { ...anchor, paused: true, lastPausedTime: 1_060n, pausedInterval: 10n };
+    assert.deepEqual(computeTopupAmount(paused, FULL, 9_999n, 0n), {
+      debtAmount: 0n,
+      topupAmount: 0n,
+      extraSeconds: 0n,
+    });
+  });
+
+  it("adds extra pre-payment and buys extra covered seconds", () => {
+    // 500 extra tokens at 100 tokens/sec buy 5 extra seconds.
+    assert.deepEqual(computeTopupAmount(anchor, FULL, 1_070n, 500n), {
+      debtAmount: 2_000n,
+      topupAmount: 2_500n,
+      extraSeconds: 5n,
+    });
+  });
+
+  it("throws on non-positive duration or full amount", () => {
+    assert.throws(() => computeTopupAmount({ ...anchor, duration: 0n }, FULL, 1_000n, 0n));
+    assert.throws(() => computeTopupAmount(anchor, 0n, 1_000n, 0n));
   });
 });

@@ -4,6 +4,8 @@
  * SDK users can preview fees and withdrawable amounts off-chain.
  */
 
+import type { StreamAnchor } from "./types.js";
+
 export const USD_PRICE_DECIMALS_SCALE = 1_000_000n;
 export const BPS_DENOMINATOR = 10_000n;
 export const MAX_FEE_TIERS = 8;
@@ -73,6 +75,45 @@ export function computeWithdrawableAmount(
     totalWithdrawable,
     currentlyWithdrawable: totalWithdrawable - withdrawnAmount,
   };
+}
+
+export interface TopupAmount {
+  /** Accrued debt in token units (stream seconds beyond `coveredUntil`). */
+  debtAmount: bigint;
+  /** Total amount to transfer: `debtAmount + extra`. */
+  topupAmount: bigint;
+  /** Additional covered seconds bought by `extra`. */
+  extraSeconds: bigint;
+}
+
+/**
+ * Mirror of the pause-aware debt math in `topup_stream_private` in
+ * `main.leo`. Debt is measured in stream time (paused durations excluded);
+ * the new on-chain `covered_until` becomes
+ * `max(coveredUntil, streamTimeNow) + extraSeconds`.
+ */
+export function computeTopupAmount(
+  anchor: Pick<
+    StreamAnchor,
+    "duration" | "paused" | "lastPausedTime" | "pausedInterval" | "coveredUntil"
+  >,
+  fullAmount: bigint,
+  now: bigint,
+  extra: bigint,
+): TopupAmount {
+  if (anchor.duration <= 0n) {
+    throw new Error("duration must be positive");
+  }
+  if (fullAmount <= 0n) {
+    throw new Error("full amount must be positive");
+  }
+  const effectiveTime = anchor.paused ? anchor.lastPausedTime : now;
+  const streamTimeNow = effectiveTime - anchor.pausedInterval;
+  const debtSeconds =
+    streamTimeNow > anchor.coveredUntil ? streamTimeNow - anchor.coveredUntil : 0n;
+  const debtAmount = (debtSeconds * fullAmount) / anchor.duration;
+  const extraSeconds = (extra * anchor.duration) / fullAmount;
+  return { debtAmount, topupAmount: debtAmount + extra, extraSeconds };
 }
 
 /** Current unix timestamp in seconds, as `bigint` (Leo `i64`). */
