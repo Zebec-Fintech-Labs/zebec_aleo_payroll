@@ -7,6 +7,7 @@
 export const USD_PRICE_DECIMALS_SCALE = 1_000_000n;
 export const BPS_DENOMINATOR = 10_000n;
 export const MAX_FEE_TIERS = 8;
+const U64_MAX = (1n << 64n) - 1n;
 
 export interface StreamFee {
   /** USD value of the stream amount (6 decimals). */
@@ -25,6 +26,10 @@ export function computeStreamFee(
   const usdValue = (amount * tokenPriceUsd) / USD_PRICE_DECIMALS_SCALE;
   const feeUsd = (usdValue * feeBps) / BPS_DENOMINATOR;
   const streamFee = (feeUsd * USD_PRICE_DECIMALS_SCALE) / aleoPriceUsd;
+  // The on-chain function asserts both results fit in u64.
+  if (usdValue > U64_MAX || streamFee > U64_MAX) {
+    throw new Error("fee computation exceeds the u64 range");
+  }
   return { usdValue, streamFee };
 }
 

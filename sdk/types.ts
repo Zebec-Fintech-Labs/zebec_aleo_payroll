@@ -41,7 +41,6 @@ export interface StreamAnchor {
   coveredUntil: bigint;
   lastPausedTime: bigint;
   pausedInterval: bigint;
-  autoWithdrawable: boolean;
   withdrawnAmount: bigint;
   isPublic: boolean;
   createdTimestamp: bigint;

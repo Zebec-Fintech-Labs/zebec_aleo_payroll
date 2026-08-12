@@ -120,7 +120,6 @@ function sampleAnchor(): StreamAnchor {
     coveredUntil: 0n,
     lastPausedTime: 0n,
     pausedInterval: 0n,
-    autoWithdrawable: true,
     withdrawnAmount: 500_000n,
     isPublic: false,
     createdTimestamp: 1_799_999_000n,

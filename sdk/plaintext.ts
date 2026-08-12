@@ -84,7 +84,6 @@ export function streamAnchorToPlaintext(a: StreamAnchor): string {
     `covered_until: ${a.coveredUntil}i64, ` +
     `last_paused_time: ${a.lastPausedTime}i64, ` +
     `paused_interval: ${a.pausedInterval}u64, ` +
-    `auto_withdrawable: ${boolLiteral(a.autoWithdrawable)}, ` +
     `withdrawn_amount: ${a.withdrawnAmount}u128, ` +
     `is_public: ${boolLiteral(a.isPublic)}, ` +
     `created_timestamp: ${a.createdTimestamp}i64, ` +
@@ -183,7 +182,6 @@ export function parseStreamAnchor(plaintext: string): StreamAnchor {
     coveredUntil: parseIntLiteral(requireMember(m, "covered_until")),
     lastPausedTime: parseIntLiteral(requireMember(m, "last_paused_time")),
     pausedInterval: parseIntLiteral(requireMember(m, "paused_interval")),
-    autoWithdrawable: parseBoolLiteral(requireMember(m, "auto_withdrawable")),
     withdrawnAmount: parseIntLiteral(requireMember(m, "withdrawn_amount")),
     isPublic: parseBoolLiteral(requireMember(m, "is_public")),
     createdTimestamp: parseIntLiteral(requireMember(m, "created_timestamp")),
