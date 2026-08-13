@@ -12,16 +12,18 @@ import { CREDITS_PROGRAM_ID, PROGRAM_ID, TOKEN_PROGRAM_ID } from "./config.ts";
 import { usePayroll } from "./hooks/usePayroll.ts";
 import EmployerPage from "./pages/EmployerPage.tsx";
 import EmployeePage from "./pages/EmployeePage.tsx";
+import PublicStreamPage from "./pages/PublicStreamPage.tsx";
 import AdminPage from "./pages/AdminPage.tsx";
 import DeployPage from "./pages/DeployPage.tsx";
 
 const wallets = [new ShieldWalletAdapter()];
 
-type Tab = "employer" | "employee" | "admin" | "deploy";
+type Tab = "employer" | "employee" | "public" | "admin" | "deploy";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "employer", label: "Employer" },
   { id: "employee", label: "Employee" },
+  { id: "public", label: "Public Streams" },
   { id: "admin", label: "Admin" },
   { id: "deploy", label: "Deploy" },
 ];
@@ -79,6 +81,7 @@ function Shell() {
         <ConnectGate>
           {tab === "employer" && <EmployerPage payroll={payroll} />}
           {tab === "employee" && <EmployeePage payroll={payroll} />}
+          {tab === "public" && <PublicStreamPage payroll={payroll} />}
           {tab === "admin" && <AdminPage payroll={payroll} />}
           {tab === "deploy" && <DeployPage payroll={payroll} />}
         </ConnectGate>
