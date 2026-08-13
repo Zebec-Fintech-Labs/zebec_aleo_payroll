@@ -10,13 +10,15 @@ import {
   merkleProofToPlaintext,
   merkleProofsToPlaintext,
   parseFeeTier,
+  parsePayroll,
   parsePayrollConfig,
   parseStreamAnchor,
   parseStructMembers,
+  payrollToPlaintext,
   streamAnchorToPlaintext,
   tokenPriceToPlaintext,
 } from "../../sdk/plaintext.js";
-import type { StreamAnchor } from "../../sdk/types.js";
+import type { Payroll, StreamAnchor } from "../../sdk/types.js";
 
 const RECEIVER = "aleo1ezamst4pjgj9zfxqq0fwfj8a4cjuqndmasgata3hggzqygggnyfq6kmyd4";
 const ADMIN = "aleo129nrpl0dxh4evdsan3f4lyhz5pdgp6klrn5atp37ejlavswx5czsk0j5dj";
@@ -106,7 +108,36 @@ describe("struct serializers", () => {
   it("rejects MerkleProofs without exactly 16 siblings", () => {
     assert.throws(() => merkleProofToPlaintext({ siblings: [1n], leafIndex: 0 }));
   });
+
+  it("serializes Payroll with member order matching the Leo struct declaration and parses as Plaintext", () => {
+    const text = payrollToPlaintext(samplePayroll());
+    assert.equal(
+      text,
+      `{ stream_id: 42field, config: 7field, sender: ${ADMIN}, receiver: ${RECEIVER}, ` +
+      `full_amount: 1000000u128, token_program: 'token', is_cancelable: true, ` +
+      `is_pausable: false, auto_withdrawable: true, can_topup: true, ` +
+      `topup_count: 1u64, initialized: true }`,
+    );
+    Plaintext.fromString(text).free();
+  });
 });
+
+function samplePayroll(): Payroll {
+  return {
+    streamId: "42field",
+    config: "7field",
+    sender: ADMIN,
+    receiver: RECEIVER,
+    fullAmount: 1_000_000n,
+    tokenProgram: "token",
+    isCancelable: true,
+    isPausable: false,
+    autoWithdrawable: true,
+    canTopup: true,
+    topupCount: 1n,
+    initialized: true,
+  };
+}
 
 function sampleAnchor(): StreamAnchor {
   return {
@@ -166,5 +197,28 @@ describe("parsers", () => {
     assert.equal(members.get("a"), "[1field, 2field]");
     assert.equal(members.get("b"), "{ c: 1u8 }");
     assert.equal(members.get("d"), "true");
+  });
+
+  it("round-trips a Payroll through serialize/parse", () => {
+    const payroll = samplePayroll();
+    assert.deepEqual(parsePayroll(payrollToPlaintext(payroll)), payroll);
+  });
+
+  it("parses a Payroll mapping value with multi-line formatting", () => {
+    const value = `{
+      stream_id: 42field,
+      config: 7field,
+      sender: ${ADMIN},
+      receiver: ${RECEIVER},
+      full_amount: 1000000u128,
+      token_program: 'token',
+      is_cancelable: true,
+      is_pausable: false,
+      auto_withdrawable: true,
+      can_topup: true,
+      topup_count: 1u64,
+      initialized: true
+    }`;
+    assert.deepEqual(parsePayroll(value), samplePayroll());
   });
 });
