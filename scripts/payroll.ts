@@ -232,6 +232,38 @@ async function createStream(): Promise<string | bigint> {
     return params.streamId;
 }
 
+async function createStreamPublic(): Promise<string | bigint> {
+    const params = STREAM_PARAMS;
+    const config = await getConfigInput();
+    const { tokenPrice, signature } = createSignedTokenPrice();
+    const { usdValue } = computeStreamFee(
+        params.amount,
+        tokenPrice.streamTokenPriceUsd,
+        tokenPrice.aleoPriceUsd,
+        0n,
+    );
+    const feeBps = await resolveFeeBps(usdValue);
+    // Prerequisite: the employer must have called `approve_public` on the token
+    // program, approving this payroll program for at least `deposit_amount`,
+    // and hold enough public credits for the fees. No records/proofs needed.
+    const txId = await senderClient.createStreamPublic(
+        params,
+        TOKEN_PROGRAM,
+        config,
+        tokenPrice,
+        signature,
+        feeBps,
+        { priorityFee: 0.1 },
+    );
+    console.log("Create public stream transaction ID:", txId);
+    await waitForConfirmation(txId);
+    const anchor = await senderClient.getStreamAnchor(params.streamId);
+    const payroll = await senderClient.getPayroll(params.streamId);
+    console.log("Created public stream anchor:", anchor);
+    console.log("Created public stream payroll:", payroll);
+    return params.streamId;
+}
+
 async function pauseStream(streamId: string | bigint) {
     const txId = await senderClient.pauseResumeStream(streamId, undefined, { priorityFee: 0.1 });
     console.log("Pause stream transaction ID:", txId);
@@ -248,6 +280,22 @@ async function resumeStream(streamId: string | bigint) {
     console.log("Stream paused?", anchor.paused, "paused interval:", anchor.pausedInterval);
 }
 
+async function pauseStreamPublic(streamId: string | bigint) {
+    const txId = await senderClient.pauseResumeStreamPublic(streamId, { priorityFee: 0.1 });
+    console.log("Pause public stream transaction ID:", txId);
+    await waitForConfirmation(txId);
+    const anchor = await senderClient.getStreamAnchor(streamId);
+    console.log("Public stream paused?", anchor.paused, "at", anchor.lastPausedTime);
+}
+
+async function resumeStreamPublic(streamId: string | bigint) {
+    const txId = await senderClient.pauseResumeStreamPublic(streamId, { priorityFee: 0.1 });
+    console.log("Resume public stream transaction ID:", txId);
+    await waitForConfirmation(txId);
+    const anchor = await senderClient.getStreamAnchor(streamId);
+    console.log("Public stream paused?", anchor.paused, "paused interval:", anchor.pausedInterval);
+}
+
 async function withdraw(streamId: string | bigint) {
     const preview = await receiverClient.getWithdrawableAmounts(streamId);
     console.log("Withdrawable preview:", preview);
@@ -258,6 +306,16 @@ async function withdraw(streamId: string | bigint) {
     console.log("Withdrawn amount:", anchor.withdrawnAmount);
 }
 
+async function withdrawPublic(streamId: string | bigint) {
+    const preview = await receiverClient.getWithdrawableAmounts(streamId);
+    console.log("Public withdrawable preview:", preview);
+    const txId = await receiverClient.withdrawPublic(streamId, undefined, undefined, { priorityFee: 0.1 });
+    console.log("Withdraw public stream transaction ID:", txId);
+    await waitForConfirmation(txId);
+    const anchor = await receiverClient.getStreamAnchor(streamId);
+    console.log("Public withdrawn amount:", anchor.withdrawnAmount);
+}
+
 async function cancelStream(streamId: string | bigint) {
     const txId = await senderClient.cancelStream(streamId, undefined, undefined, { priorityFee: 0.1 });
     console.log("Cancel stream transaction ID:", txId);
@@ -266,33 +324,58 @@ async function cancelStream(streamId: string | bigint) {
     console.log("Stream canceled?", anchor.canceled, "at", anchor.canceledAt);
 }
 
+async function cancelStreamPublic(streamId: string | bigint) {
+    const txId = await senderClient.cancelStreamPublic(streamId, undefined, undefined, { priorityFee: 0.1 });
+    console.log("Cancel public stream transaction ID:", txId);
+    await waitForConfirmation(txId);
+    const anchor = await senderClient.getStreamAnchor(streamId);
+    console.log("Public stream canceled?", anchor.canceled, "at", anchor.canceledAt);
+}
+
 async function main() {
+    const publicMode = process.env.PUBLIC_STREAM === "1";
     let start = Date.now();
-    const streamId = await createStream();
+    const streamId = publicMode ? await createStreamPublic() : await createStream();
     let end = Date.now();
     console.log(`Stream creation took ${(end - start) / 1000} seconds`);
     await setTimeout(5_000);
     console.log("Pausing stream...");
     start = Date.now();
-    await pauseStream(streamId);
+    if (publicMode) {
+        await pauseStreamPublic(streamId);
+    } else {
+        await pauseStream(streamId);
+    }
     end = Date.now();
     console.log(`Stream pause took ${(end - start) / 1000} seconds`);
     await setTimeout(5_000);
     console.log("Resuming stream...");
     start = Date.now();
-    await resumeStream(streamId);
+    if (publicMode) {
+        await resumeStreamPublic(streamId);
+    } else {
+        await resumeStream(streamId);
+    }
     end = Date.now();
     console.log(`Stream resume took ${(end - start) / 1000} seconds`);
     await setTimeout(5_000);
     console.log("Withdrawing from stream...");
     start = Date.now();
-    await withdraw(streamId);
+    if (publicMode) {
+        await withdrawPublic(streamId);
+    } else {
+        await withdraw(streamId);
+    }
     end = Date.now();
     console.log(`Stream withdraw took ${(end - start) / 1000} seconds`);
     await setTimeout(5_000);
     console.log("Canceling stream...");
     start = Date.now();
-    await cancelStream(streamId);
+    if (publicMode) {
+        await cancelStreamPublic(streamId);
+    } else {
+        await cancelStream(streamId);
+    }
     end = Date.now();
     console.log(`Stream cancel took ${(end - start) / 1000} seconds`);
     console.log("Payroll stream lifecycle completed successfully.");
