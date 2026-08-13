@@ -21,8 +21,11 @@ import {
   merkleProofsToPlaintext,
   parseBoolLiteral,
   parseFeeTier,
+  parseIntLiteral,
+  parsePayroll,
   parsePayrollConfig,
   parseStreamAnchor,
+  payrollToPlaintext,
   streamAnchorToPlaintext,
   tokenPriceToPlaintext,
 } from "./plaintext.js";
@@ -33,6 +36,7 @@ import type {
   ExecuteOptions,
   FeeTier,
   MerkleProof,
+  Payroll,
   PayrollClientOptions as PayrollServiceOptions,
   PayrollConfig,
   StreamAnchor,
@@ -170,7 +174,7 @@ export class PayrollService {
   }
 
   /**
-   * Execute `cancel_private`. The sender ticket record and the on-chain
+   * Execute `cancel_stream_private`. The sender ticket record and the on-chain
    * stream anchor are resolved automatically when omitted.
    */
   async cancelStream(
@@ -182,11 +186,11 @@ export class PayrollService {
     const ticketRecord = ticket?.toString() ?? (await this.findTicket("SenderPayrollTicket", streamId));
     const anchor = await this.getStreamAnchor(streamId);
     const inputs = [ticketRecord, streamAnchorToPlaintext(anchor), `${now}i64`];
-    return this.execute("cancel_private", inputs, options, await this.ticketTokenImport(ticketRecord));
+    return this.execute("cancel_stream_private", inputs, options, await this.ticketTokenImport(ticketRecord));
   }
 
   /**
-   * Execute `withdraw_private`. The receiver ticket record and the on-chain
+   * Execute `withdraw_stream_private`. The receiver ticket record and the on-chain
    * stream anchor are resolved automatically when omitted.
    */
   async withdraw(
@@ -198,7 +202,37 @@ export class PayrollService {
     const ticketRecord = ticket?.toString() ?? (await this.findTicket("ReceiverPayrollTicket", streamId));
     const anchor = await this.getStreamAnchor(streamId);
     const inputs = [ticketRecord, streamAnchorToPlaintext(anchor), `${now}i64`];
-    return this.execute("withdraw_private", inputs, options, await this.ticketTokenImport(ticketRecord));
+    return this.execute("withdraw_stream_private", inputs, options, await this.ticketTokenImport(ticketRecord));
+  }
+
+  /**
+   * Execute `withdraw_stream_auto_private`: pay out the receiver's accrued
+   * amount on behalf of the receiver. Withdrawer only — the withdrawer ticket
+   * record and the on-chain anchor are resolved automatically when omitted.
+   */
+  async withdrawAuto(
+    streamId: string | bigint,
+    config: Config,
+    now: bigint = nowSeconds(),
+    ticket?: string | RecordPlaintext,
+    options: ExecuteOptions = {},
+  ): Promise<string> {
+    const ticketRecord =
+      ticket?.toString() ?? (await this.findTicket("WithdrawerPayrollTicket", streamId));
+    const anchor = await this.getStreamAnchor(streamId);
+    const inputs = [
+      ticketRecord,
+      configToPlaintext(config),
+      streamAnchorToPlaintext(anchor),
+      `${now}i64`,
+    ];
+    const tokenMatch = /token_program:\s*([a-zA-Z0-9_]+)/.exec(ticketRecord);
+    if (tokenMatch === null) {
+      throw new Error("could not parse token_program from the ticket record");
+    }
+    return this.execute("withdraw_stream_auto_private", inputs, options, {
+      [`${tokenMatch[1]}.aleo`]: await this.loadProgramSource(`${tokenMatch[1]}.aleo`),
+    });
   }
 
   /**
@@ -238,6 +272,96 @@ export class PayrollService {
       merkleProofsToPlaintext(merkleProofs),
     ];
     return this.execute("topup_stream_private", inputs, options, {
+      [tokenProgramId]: await this.loadProgramSource(tokenProgramId),
+    });
+  }
+
+  /**
+   * Execute `create_stream_public`. Unlike the private variant, the token
+   * deposit is pulled from the signer's public balance (the program calls
+   * `IARC22::transfer_from_public`), so no credit/token records are needed —
+   * the employer must have approved this program on the token and hold enough
+   * public credits for the fees. `merkleProofs` is not required either.
+   */
+  async createStreamPublic(
+    params: CreateStreamParams,
+    tokenProgram: string,
+    config: Config,
+    tokenPrice: TokenPrice,
+    priceSignature: string,
+    feeBps: bigint,
+    options: ExecuteOptions = {},
+  ): Promise<string> {
+    const tokenProgramId = `${tokenProgram}.aleo`;
+    const inputs = [
+      createStreamParamsToPlaintext(params),
+      identLiteral(tokenProgram),
+      configToPlaintext(config),
+      tokenPriceToPlaintext(tokenPrice),
+      priceSignature,
+      `${feeBps}u64`,
+    ];
+    const extraImports = {
+      [tokenProgramId]: await this.loadProgramSource(tokenProgramId),
+    };
+    return this.execute("create_stream_public", inputs, options, extraImports);
+  }
+
+  /**
+   * Execute `pause_resume_stream_public` (toggles pause/resume). The signer
+   * must be the payroll's sender; only the stream id is needed as input.
+   */
+  async pauseResumeStreamPublic(
+    streamId: string | bigint,
+    options: ExecuteOptions = {},
+  ): Promise<string> {
+    return this.execute("pause_resume_stream_public", [fieldLiteral(streamId)], options);
+  }
+
+  /**
+   * Execute `cancel_stream_public`. The payroll (`payrolls` mapping) and the
+   * on-chain anchor are resolved automatically when omitted. The signer must
+   * be the payroll's sender.
+   */
+  async cancelStreamPublic(
+    streamId: string | bigint,
+    now: bigint = nowSeconds(),
+    payroll?: Payroll,
+    options: ExecuteOptions = {},
+  ): Promise<string> {
+    const payrollValue = payroll ?? (await this.getPayroll(streamId));
+    const anchor = await this.getStreamAnchor(streamId);
+    const inputs = [
+      payrollToPlaintext(payrollValue),
+      streamAnchorToPlaintext(anchor),
+      `${now}i64`,
+    ];
+    const tokenProgramId = `${payrollValue.tokenProgram}.aleo`;
+    return this.execute("cancel_stream_public", inputs, options, {
+      [tokenProgramId]: await this.loadProgramSource(tokenProgramId),
+    });
+  }
+
+  /**
+   * Execute `withdraw_stream_public`. The payroll (`payrolls` mapping) and the
+   * on-chain anchor are resolved automatically when omitted. The signer must
+   * be the payroll's receiver.
+   */
+  async withdrawPublic(
+    streamId: string | bigint,
+    now: bigint = nowSeconds(),
+    payroll?: Payroll,
+    options: ExecuteOptions = {},
+  ): Promise<string> {
+    const payrollValue = payroll ?? (await this.getPayroll(streamId));
+    const anchor = await this.getStreamAnchor(streamId);
+    const inputs = [
+      payrollToPlaintext(payrollValue),
+      streamAnchorToPlaintext(anchor),
+      `${now}i64`,
+    ];
+    const tokenProgramId = `${payrollValue.tokenProgram}.aleo`;
+    return this.execute("withdraw_stream_public", inputs, options, {
       [tokenProgramId]: await this.loadProgramSource(tokenProgramId),
     });
   }
@@ -324,6 +448,16 @@ export class PayrollService {
       fieldLiteral(streamId),
     );
     return parseStreamAnchor(value);
+  }
+
+  /** Read and parse `payrolls[streamId]` (public streams only). */
+  async getPayroll(streamId: string | bigint): Promise<Payroll> {
+    const value = await this.networkClient.getProgramMappingValue(
+      this.programId,
+      "payrolls",
+      fieldLiteral(streamId),
+    );
+    return parsePayroll(value);
   }
 
   /** Read and parse `payroll_config[configName]`. */
@@ -533,8 +667,8 @@ export class PayrollService {
   /**
    * Extract the `token_program` identifier from a payroll ticket record
    * plaintext and load the source of the corresponding token program, as
-   * required for the dynamic token calls of `withdraw_private` and
-   * `cancel_private`.
+   * required for the dynamic token calls of `withdraw_stream_private` and
+   * `cancel_stream_private`.
    */
   private async ticketTokenImport(ticketRecord: string): Promise<Record<string, string>> {
     const match = /token_program:\s*([a-zA-Z0-9_]+)/.exec(ticketRecord);
@@ -550,5 +684,197 @@ export class PayrollService {
       throw new Error("PayrollClient was constructed without a privateKey");
     }
     return this.privateKey;
+  }
+}
+
+// ===========================================================================
+// Arc22Service — IARC22 token program client (approve / unapprove / views)
+// ===========================================================================
+
+export interface Arc22ServiceOptions {
+  /** Bare IARC22 token-program identifier, e.g. `"test_usdcx_stablecoin"` (no `.aleo`). */
+  tokenProgram: string;
+  host?: string;
+  privateKey?: string;
+  /** Compiled source of the token program; required for local proving and offline view reads. */
+  programSource?: string;
+  programImports?: Record<string, string>;
+  proverUri?: string;
+  proverApiKey?: string;
+  proverConsumerId?: string;
+}
+
+/**
+ * High-level interface to an IARC22 token program (e.g.
+ * `test_usdcx_stablecoin.aleo`). Exposes `approve` / `unapprove` (the
+ * on-chain entry points needed to fund payroll streams) plus offline view
+ * reads (`getAllowance`, `getBalanceOf`).
+ */
+export class Arc22Service {
+  readonly tokenProgram: string;
+  readonly programId: string;
+  readonly networkClient: AleoNetworkClient;
+  readonly programManager: ProgramManager;
+  readonly account?: Account;
+
+  private readonly programSource?: string;
+  private readonly programImports?: Record<string, string>;
+  private readonly proverUri?: string;
+  private readonly proverApiKey?: string;
+  private readonly proverConsumerId?: string;
+  private readonly programSourceCache = new Map<string, string>();
+
+  constructor(options: Arc22ServiceOptions) {
+    if (!options.tokenProgram) {
+      throw new Error("Arc22Service requires a tokenProgram identifier");
+    }
+    const host = options.host ?? DEFAULT_ENDPOINT;
+    this.tokenProgram = options.tokenProgram;
+    this.programId = `${options.tokenProgram}.aleo`;
+    this.networkClient = new AleoNetworkClient(host);
+    const keyProvider = new AleoKeyProvider();
+    keyProvider.useCache(true);
+    this.programManager = new ProgramManager(host, keyProvider);
+    if (options.privateKey !== undefined) {
+      this.account = new Account({ privateKey: options.privateKey });
+      this.programManager.setAccount(this.account);
+    }
+    if (options.programSource !== undefined) {
+      this.programSource = options.programSource;
+    }
+    if (options.programImports !== undefined) {
+      this.programImports = options.programImports;
+    }
+    if (options.proverUri !== undefined) {
+      this.proverUri = options.proverUri;
+      this.networkClient.setProverUri(options.proverUri);
+    }
+    if (options.proverApiKey !== undefined) {
+      this.proverApiKey = options.proverApiKey;
+    }
+    if (options.proverConsumerId !== undefined) {
+      this.proverConsumerId = options.proverConsumerId;
+    }
+  }
+
+  // =========================================================================
+  // Mutating entry points
+  // =========================================================================
+
+  /** Approve `spender` to spend `amount` (u128) of the caller's tokens. */
+  async approve(
+    spender: string,
+    amount: bigint,
+    options: ExecuteOptions = {},
+  ): Promise<string> {
+    return this.execute("approve_public", [spender, `${amount}u128`], options);
+  }
+
+  /** Revoke `amount` (u128) of an existing allowance granted to `spender`. */
+  async unapprove(
+    spender: string,
+    amount: bigint,
+    options: ExecuteOptions = {},
+  ): Promise<string> {
+    return this.execute("unapprove_public", [spender, `${amount}u128`], options);
+  }
+
+  // =========================================================================
+  // View reads (offline `run`, no broadcast)
+  // =========================================================================
+
+  /** On-chain `allowance(owner, spender) -> u128`. */
+  async getAllowance(owner: string, spender: string): Promise<bigint> {
+    return this.viewRead("allowance", [owner, spender]);
+  }
+
+  /** On-chain `balance_of(account) -> u128`. */
+  async getBalanceOf(account: string): Promise<bigint> {
+    return this.viewRead("balance_of", [account]);
+  }
+
+  // =========================================================================
+  // Internals
+  // =========================================================================
+
+  private async viewRead(functionName: string, inputs: string[]): Promise<bigint> {
+    const source = this.programSource ?? (await this.loadProgramSource(this.programId));
+    const response = await this.programManager.run(source, functionName, inputs, false);
+    const outputs = response.getOutputs();
+    if (outputs.length === 0) {
+      throw new Error(`view function ${functionName} returned no outputs`);
+    }
+    return parseIntLiteral(outputs[0]);
+  }
+
+  private async execute(
+    functionName: string,
+    inputs: string[],
+    options: ExecuteOptions,
+    extraImports?: Record<string, string>,
+  ): Promise<string> {
+    if (this.account === undefined) {
+      throw new Error("Arc22Service was constructed without a privateKey");
+    }
+    const imports = { ...this.programImports, ...extraImports };
+    if (this.proverUri !== undefined) {
+      return this.executeDelegated(functionName, inputs, options, imports);
+    }
+    const keySearchParams = { cacheKey: `${this.programId}:${functionName}` };
+    return this.programManager.execute({
+      programName: this.programId,
+      functionName,
+      priorityFee: options.priorityFee ?? 0,
+      privateFee: options.privateFee ?? false,
+      inputs,
+      ...(this.programSource !== undefined ? { program: this.programSource } : {}),
+      ...(Object.keys(imports).length > 0 ? { imports } : {}),
+      ...(options.feeRecord !== undefined ? { feeRecord: options.feeRecord } : {}),
+      keySearchParams,
+    });
+  }
+
+  private async executeDelegated(
+    functionName: string,
+    inputs: string[],
+    options: ExecuteOptions,
+    imports: Record<string, string>,
+  ): Promise<string> {
+    const provingRequest = await this.programManager.provingRequest({
+      programName: this.programId,
+      functionName,
+      priorityFee: options.priorityFee ?? 0,
+      privateFee: options.privateFee ?? false,
+      inputs,
+      broadcast: true,
+      unchecked: false,
+      ...(this.programSource !== undefined ? { programSource: this.programSource } : {}),
+      ...(Object.keys(imports).length > 0 ? { programImports: imports } : {}),
+      ...(options.feeRecord !== undefined ? { feeRecord: options.feeRecord } : {}),
+    });
+    const response = await this.networkClient.submitProvingRequest({
+      provingRequest,
+      ...(this.proverApiKey !== undefined ? { apiKey: this.proverApiKey } : {}),
+      ...(this.proverConsumerId !== undefined ? { consumerId: this.proverConsumerId } : {}),
+    });
+
+    const broadcast = response.broadcast_result;
+    if (broadcast.status.toLowerCase() !== "accepted") {
+      const detail = "message" in broadcast ? broadcast.message : undefined;
+      throw new Error(
+        `proving service failed to broadcast the transaction (status: ${broadcast.status})${detail ? `: ${detail}` : ""}`,
+      );
+    }
+    return response.transaction.id;
+  }
+
+  private async loadProgramSource(programId: string): Promise<string> {
+    const provided = this.programImports?.[programId];
+    if (provided !== undefined) return provided;
+    const cached = this.programSourceCache.get(programId);
+    if (cached !== undefined) return cached;
+    const source = await this.networkClient.getProgram(programId);
+    this.programSourceCache.set(programId, source);
+    return source;
   }
 }

@@ -4,9 +4,11 @@
 
 export {
   PayrollService as PayrollClient,
+  Arc22Service,
   DEFAULT_ENDPOINT,
   PROGRAM_ID,
 } from "./client.js";
+export type { Arc22ServiceOptions } from "./client.js";
 
 export {
   createStreamParamsToPlaintext,
@@ -15,15 +17,18 @@ export {
   streamAnchorToPlaintext,
   merkleProofToPlaintext,
   merkleProofsToPlaintext,
+  payrollToPlaintext,
   fieldLiteral,
   identLiteral,
   parseStructMembers,
   parseStreamAnchor,
+  parsePayroll,
   parsePayrollConfig,
   parseFeeTier,
   parseIntLiteral,
   parseBoolLiteral,
   parseFieldLiteral,
+  parseIdentLiteral,
 } from "./plaintext.js";
 
 export {
@@ -60,6 +65,7 @@ export type {
   ExecuteOptions,
   FeeTier,
   MerkleProof,
+  Payroll,
   PayrollClientOptions,
   PayrollConfig,
   StreamAnchor,

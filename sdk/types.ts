@@ -19,6 +19,23 @@ export interface FeeTier {
   feeBps: bigint;
 }
 
+/** Leo `Payroll` struct, as stored in the `payrolls` mapping (public streams only). */
+export interface Payroll {
+  streamId: string;
+  /** Config (tenant) the stream was created under. */
+  config: string;
+  sender: string;
+  receiver: string;
+  fullAmount: bigint;
+  tokenProgram: string;
+  isCancelable: boolean;
+  isPausable: boolean;
+  autoWithdrawable: boolean;
+  canTopup: boolean;
+  topupCount: bigint;
+  initialized: boolean;
+}
+
 /** Leo `PayrollConfig` struct, as stored in the `payroll_config` mapping. */
 export interface PayrollConfig {
   admin: string;

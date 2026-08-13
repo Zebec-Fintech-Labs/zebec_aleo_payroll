@@ -15,6 +15,7 @@ import type {
   CreateStreamParams,
   FeeTier,
   MerkleProof,
+  Payroll,
   PayrollConfig,
   StreamAnchor,
   TokenPrice,
@@ -35,6 +36,18 @@ export function identLiteral(name: string): string {
     throw new Error(`invalid identifier: ${name}`);
   }
   return `'${trimmed}'`;
+}
+
+/** Serialize a `Payroll` struct to its Leo plaintext literal. */
+export function payrollToPlaintext(p: Payroll): string {
+  return validated(
+    `{ stream_id: ${fieldLiteral(p.streamId)}, config: ${fieldLiteral(p.config)}, ` +
+    `sender: ${p.sender}, receiver: ${p.receiver}, ` +
+    `full_amount: ${p.fullAmount}u128, token_program: ${identLiteral(p.tokenProgram)}, ` +
+    `is_cancelable: ${boolLiteral(p.isCancelable)}, is_pausable: ${boolLiteral(p.isPausable)}, ` +
+    `auto_withdrawable: ${boolLiteral(p.autoWithdrawable)}, can_topup: ${boolLiteral(p.canTopup)}, ` +
+    `topup_count: ${p.topupCount}u64, initialized: ${boolLiteral(p.initialized)} }`
+  );
 }
 
 function boolLiteral(value: boolean): string {
@@ -173,6 +186,36 @@ export function parseBoolLiteral(value: string): boolean {
 /** Normalize a parsed field literal to canonical form (`"123field"`). */
 export function parseFieldLiteral(value: string): string {
   return fieldLiteral(value.trim());
+}
+
+/** Parse an identifier literal (`"'my_token'"`) to its bare form (`"my_token"`). */
+export function parseIdentLiteral(value: string): string {
+  const v = value.trim();
+  const m = /^'([a-z][a-z0-9_]{0,30})'$/.exec(v);
+  if (!m) throw new Error(`not an identifier literal: ${value}`);
+  return m[1]!;
+}
+
+/** Parse a `Payroll` mapping value. */
+export function parsePayroll(plaintext: string): Payroll {
+  if (!plaintext) {
+    throw new Error("value is empty: " + plaintext);
+  }
+  const m = parseStructMembers(plaintext);
+  return {
+    streamId: parseFieldLiteral(requireMember(m, "stream_id")),
+    config: parseFieldLiteral(requireMember(m, "config")),
+    sender: requireMember(m, "sender"),
+    receiver: requireMember(m, "receiver"),
+    fullAmount: parseIntLiteral(requireMember(m, "full_amount")),
+    tokenProgram: parseIdentLiteral(requireMember(m, "token_program")),
+    isCancelable: parseBoolLiteral(requireMember(m, "is_cancelable")),
+    isPausable: parseBoolLiteral(requireMember(m, "is_pausable")),
+    autoWithdrawable: parseBoolLiteral(requireMember(m, "auto_withdrawable")),
+    canTopup: parseBoolLiteral(requireMember(m, "can_topup")),
+    topupCount: parseIntLiteral(requireMember(m, "topup_count")),
+    initialized: parseBoolLiteral(requireMember(m, "initialized")),
+  };
 }
 
 /** Parse a `StreamAnchor` mapping value. */
