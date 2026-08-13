@@ -370,7 +370,7 @@ export class WalletPayrollService {
   async getPayrollConfig(configName: string | bigint = CONFIG_NAME): Promise<PayrollConfig> {
     const value = await this.networkClient.getProgramMappingValue(
       PROGRAM_ID,
-      "payroll_config",
+      "payroll_configs",
       fieldLiteral(configName),
     );
     return parsePayrollConfig(value);

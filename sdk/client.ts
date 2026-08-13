@@ -329,7 +329,7 @@ export class PayrollService {
   async getPayrollConfig(configName: string | bigint): Promise<PayrollConfig> {
     const value = await this.networkClient.getProgramMappingValue(
       this.programId,
-      "payroll_config",
+      "payroll_configs",
       fieldLiteral(configName),
     );
     return parsePayrollConfig(value);
@@ -439,6 +439,7 @@ export class PayrollService {
     options: ExecuteOptions,
     extraImports?: Record<string, string>,
   ): Promise<string> {
+    console.log("inputs", inputs);
     if (this.account === undefined) {
       throw new Error("PayrollClient was constructed without a privateKey");
     }
@@ -490,11 +491,11 @@ export class PayrollService {
       ...(Object.keys(imports).length > 0 ? { programImports: imports } : {}),
       ...(options.feeRecord !== undefined ? { feeRecord: options.feeRecord } : {}),
     });
-    try {
-      console.log("proving request authorization:", provingRequest.authorization().toString());
-    } catch (e) {
-      console.log("could not dump proving request authorization:", (e as Error).message ?? e);
-    }
+    // try {
+    // console.log("proving request authorization:", provingRequest.authorization().toString());
+    // } catch (e) {
+    // console.log("could not dump proving request authorization:", (e as Error).message ?? e);
+    // }
     console.log("prover url", this.networkClient.proverUri);
     const response = await this.networkClient.submitProvingRequest({
       provingRequest,

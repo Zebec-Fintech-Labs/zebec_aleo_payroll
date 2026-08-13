@@ -9,7 +9,7 @@ export const FREEZE_LIST_URL =
   "https://api.explorer.provable.com/v2/testnet/programs/test_usdcx_freezelist.aleo/compliance/freeze-list";
 
 /** On-chain config key, derived exactly as in scripts/payroll.ts. */
-export const CONFIG_NAME = configNameToField("Payroll_Config_001");
+export const CONFIG_NAME = configNameToField("Payroll_Config_002");
 
 /** Bare identifier of the stream token program (no `.aleo` suffix). */
 export const TOKEN_PROGRAM = "test_usdcx_stablecoin";

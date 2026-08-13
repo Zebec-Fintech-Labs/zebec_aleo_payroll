@@ -100,7 +100,7 @@ if (sender === receiver) {
     process.exit(1);
 }
 
-const CONFIG_NAME = configNameToField("Payroll_Config_001");
+const CONFIG_NAME = configNameToField("Payroll_Config_002");
 const TOKEN_PROGRAM = "test_usdcx_stablecoin";
 const TOKEN_PRICE_USD = 1_000_000n; // $1.00, 6 decimals
 const ALEO_PRICE_USD = 200_000n; // $0.20, 6 decimals
@@ -221,17 +221,8 @@ async function createStream(): Promise<string | bigint> {
         proofs,
         {
             priorityFee: 0.1,
-            creditRecord: RecordPlaintext.fromString(`{
-  owner: aleo12czxn500cyj9a7lweuft6r4rrckthfck5k8440qh7atgrnt5kupqsfh038.private,
-  microcredits: 10000000u64.private,
-  _nonce: 6410260858307819024593913311999508957203522779225348165403325458147180369361group.public,
-  _version: 1u8.public
-}`), tokenRecord: RecordPlaintext.fromString(`{
-  owner: aleo12czxn500cyj9a7lweuft6r4rrckthfck5k8440qh7atgrnt5kupqsfh038.private,
-  amount: 40000000u128.private,
-  _nonce: 5129322304556379667216924448175967718654626044730865730388167874744975697882group.public,
-  _version: 1u8.public
-}`)
+            creditRecord: "{ owner: aleo12czxn500cyj9a7lweuft6r4rrckthfck5k8440qh7atgrnt5kupqsfh038.private, microcredits: 10000000u64.private, _nonce: 6410260858307819024593913311999508957203522779225348165403325458147180369361group.public, _version: 1u8.public }",
+            tokenRecord: "{ owner: aleo12czxn500cyj9a7lweuft6r4rrckthfck5k8440qh7atgrnt5kupqsfh038.private, amount: 40000000u128.private, _nonce: 5129322304556379667216924448175967718654626044730865730388167874744975697882group.public, _version: 1u8.public }"
         },
     );
     console.log("Create stream transaction ID:", txId);
