@@ -150,9 +150,10 @@ export class PayrollService {
       tokenRecord,
       merkleProofsToPlaintext(merkleProofs),
     ];
-    return this.execute("create_stream_private", inputs, options, {
+    const extraImports = {
       [tokenProgramId]: await this.loadProgramSource(tokenProgramId),
-    });
+    };
+    return this.execute("create_stream_private", inputs, options, extraImports);
   }
 
   /**
