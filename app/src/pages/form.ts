@@ -1,5 +1,7 @@
 /** Small form-parsing helpers shared by the pages. */
 
+import { Field } from "@provablehq/sdk/testnet.js";
+
 /** Parse a non-negative integer string to bigint, or throw a form error. */
 export function parseBig(value: string, label: string, { positive = false } = {}): bigint {
   const trimmed = value.trim();
@@ -37,8 +39,7 @@ export function requirePrefix(value: string, prefix: string, label: string): str
 
 /** Random 128-bit field value (stream ids). */
 export function randomField(): bigint {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
+  const bytes = Field.random().toBytesLe();
   return BigInt(
     "0x" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(""),
   );
