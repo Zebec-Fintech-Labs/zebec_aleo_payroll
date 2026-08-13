@@ -17,6 +17,12 @@ export interface UsePayroll {
    * Returns the operation result, or `undefined` on error (see `error`).
    */
   runTx: <T>(op: (service: WalletPayrollService) => Promise<T>) => Promise<T | undefined>;
+  /**
+   * Run any async operation (e.g. the token `WalletArc22Service` methods,
+   * which are not `WalletPayrollService` methods) with the same busy/error
+   * handling. Returns the operation result, or `undefined` on error.
+   */
+  runAsync: <T>(op: () => Promise<T>) => Promise<T | undefined>;
 }
 
 /** Build a `WalletPayrollService` from the connected wallet. */
@@ -75,7 +81,24 @@ export function usePayroll(): UsePayroll {
     [service],
   );
 
+  const runAsync = useCallback(
+    async <T,>(op: () => Promise<T>): Promise<T | undefined> => {
+      setBusy(true);
+      setError(null);
+      try {
+        return await op();
+      } catch (e) {
+        console.error("Error running op:", e);
+        setError(e instanceof Error ? e.message : String(e));
+        return undefined;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [],
+  );
+
   const clearError = useCallback(() => setError(null), []);
 
-  return { service, address, connected, busy, error, clearError, runTx };
+  return { service, address, connected, busy, error, clearError, runTx, runAsync };
 }

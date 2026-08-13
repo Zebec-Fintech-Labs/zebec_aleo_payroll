@@ -6,7 +6,7 @@
  * through an `AleoNetworkClient`, exactly as in the Node SDK.
  */
 
-import { AleoNetworkClient, SealanceMerkleTree } from "@provablehq/sdk/testnet.js";
+import { Address, AleoNetworkClient, SealanceMerkleTree } from "@provablehq/sdk/testnet.js";
 import type { TransactionStatusResponse } from "@provablehq/aleo-types";
 import type { AleoDeployment } from "@provablehq/aleo-wallet-standard";
 
@@ -135,6 +135,7 @@ function matchesTicket(text: string, recordName: TicketRecordName): boolean {
 export class WalletPayrollService {
   readonly wallet: PayrollWallet;
   readonly networkClient: AleoNetworkClient;
+  private programAddress: string | undefined;
 
   constructor(wallet: PayrollWallet) {
     this.wallet = wallet;
@@ -466,6 +467,18 @@ export class WalletPayrollService {
   // =======================================================================
   // Reads (mapping queries)
   // =======================================================================
+
+  /**
+   * The payroll program's own on-chain address — what `std::ctx::addr()`
+   * resolves to inside the program. Needed as the `spender` for
+   * `approve_public` on the token program before `create_stream_public`'s
+   * deposit transfer, and matches `self_address` in the cancel/withdraw
+   * transitions.
+   */
+  getProgramAddress(): string {
+    this.programAddress ??= Address.fromProgramId(PROGRAM_ID).toString();
+    return this.programAddress;
+  }
 
   /** Read and parse `stream_anchors[streamId]`. */
   async getStreamAnchor(streamId: string | bigint): Promise<StreamAnchor> {
