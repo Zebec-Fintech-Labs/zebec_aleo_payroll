@@ -10,6 +10,7 @@
     "@types/node": "^26.1.2",
     "dotenv": "^17.4.2",
     "mocha": "^11.7.6",
+    "rimraf": "^6.1.3",
     "tsx": "^4.23.5",
     "typescript": "^7.0.2"
   },
@@ -26,14 +27,14 @@
   "main": "dist/index.js",
   "name": "zebec-payroll-sdk",
   "scripts": {
-    "build": "leo build",
+    "build": "leo clean && leo build",
     "clean": "leo clean",
     "run:admin": "tsx scripts/admin.ts",
     "run:deploy": "tsx scripts/deploy.ts",
     "run:payroll": "tsx scripts/payroll.ts",
     "run:upgrade": "tsx scripts/upgrade.ts",
     "sdk:build": "npm run sdk:clean && tsc -p tsconfig.json",
-    "sdk:clean": "rm -rf dist .test-dist",
+    "sdk:clean": "rimraf dist .test-dist",
     "sdk:test:integration": "ts-mocha -p tsconfig.test.json --timeout 600000 '.test-dist/sdk-tests/integration/**/*.test.js'",
     "sdk:test:unit": "tsc -p tsconfig.test.json && mocha '.test-dist/sdk-tests/unit/**/*.test.js'"
   },
