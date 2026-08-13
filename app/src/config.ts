@@ -16,6 +16,21 @@ export const TOKEN_PROGRAM = "test_usdcx_stablecoin";
 export const TOKEN_PROGRAM_ID = `${TOKEN_PROGRAM}.aleo`;
 export const CREDITS_PROGRAM_ID = "credits.aleo";
 
+/**
+ * Programs the wallet must load as external stacks for the payroll program's
+ * `call.dynamic` token transfers. The payroll program only *statically* imports
+ * credits.aleo, so the token program and its transitive imports are invisible to
+ * the wallet's process builder unless declared here. Without them the dynamic
+ * dispatch fails with "External stack for 'test_usdcx_stablecoin.aleo' does not
+ * exist". Order is leaves-first (dependencies before dependents).
+ */
+export const DYNAMIC_DISPATCH_IMPORTS = [
+  "merkle_tree.aleo",
+  "test_usdcx_multisig_core.aleo",
+  "test_usdcx_freezelist.aleo",
+  TOKEN_PROGRAM_ID,
+];
+
 /** Fixed price attestation values (USD, 6 decimals), as in scripts/payroll.ts. */
 export const TOKEN_PRICE_USD = 1_000_000n; // $1.00
 export const ALEO_PRICE_USD = 200_000n; // $0.20

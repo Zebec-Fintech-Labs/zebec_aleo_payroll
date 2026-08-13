@@ -46,6 +46,7 @@ import {
   CONFIG_NAME,
   CREDITS_PROGRAM_ID,
   DEFAULT_FEE,
+  DYNAMIC_DISPATCH_IMPORTS,
   FREEZE_LIST_URL,
   HOST,
   PROGRAM_ID,
@@ -65,6 +66,11 @@ export interface PayrollWallet {
     inputs: string[];
     fee?: number;
     privateFee?: boolean;
+    /**
+     * Program names the wallet must load as external stacks for
+     * `call.dynamic` dispatch. See `DYNAMIC_DISPATCH_IMPORTS`.
+     */
+    imports?: string[];
   }): Promise<{ transactionId: string } | undefined>;
   transactionStatus(transactionId: string): Promise<TransactionStatusResponse>;
   executeDeployment(deployment: AleoDeployment): Promise<{ transactionId: string }>;
@@ -204,7 +210,7 @@ export class WalletPayrollService {
       tokenRecord,
       merkleProofs,
     ];
-    return this.execute("create_stream_private", inputs, fee);
+    return this.execute("create_stream_private", inputs, fee, DYNAMIC_DISPATCH_IMPORTS);
   }
 
   /** Execute `pause_resume_stream_private` (toggles pause/resume). */
@@ -224,7 +230,7 @@ export class WalletPayrollService {
     const ticket = await this.findTicket("SenderPayrollTicket", streamId);
     const anchor = await this.getStreamAnchor(streamId);
     const inputs = [ticket, streamAnchorToPlaintext(anchor), `${nowSeconds()}i64`];
-    return this.execute("cancel_private", inputs, fee);
+    return this.execute("cancel_private", inputs, fee, DYNAMIC_DISPATCH_IMPORTS);
   }
 
   /** Execute `withdraw_private`. */
@@ -235,7 +241,7 @@ export class WalletPayrollService {
     const ticket = await this.findTicket("ReceiverPayrollTicket", streamId);
     const anchor = await this.getStreamAnchor(streamId);
     const inputs = [ticket, streamAnchorToPlaintext(anchor), `${nowSeconds()}i64`];
-    return this.execute("withdraw_private", inputs, fee);
+    return this.execute("withdraw_private", inputs, fee, DYNAMIC_DISPATCH_IMPORTS);
   }
 
   /**
@@ -267,7 +273,7 @@ export class WalletPayrollService {
       tokenRecord,
       merkleProofs,
     ];
-    return this.execute("topup_stream_private", inputs, fee);
+    return this.execute("topup_stream_private", inputs, fee, DYNAMIC_DISPATCH_IMPORTS);
   }
 
   // =======================================================================
@@ -626,6 +632,7 @@ export class WalletPayrollService {
     functionName: string,
     inputs: string[],
     fee: number,
+    imports?: string[],
   ): Promise<string> {
     const result = await this.wallet.executeTransaction({
       program: PROGRAM_ID,
@@ -633,6 +640,7 @@ export class WalletPayrollService {
       inputs,
       fee,
       privateFee: false,
+      ...(imports !== undefined ? { imports } : {}),
     });
     if (result === undefined || result.transactionId === "") {
       throw new Error("wallet did not return a transaction id (rejected?)");
