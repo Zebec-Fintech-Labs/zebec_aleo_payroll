@@ -26,8 +26,10 @@ import {
   identLiteral,
   parseBoolLiteral,
   parseFeeTier,
+  parsePayroll,
   parsePayrollConfig,
   parseStreamAnchor,
+  payrollToPlaintext,
   streamAnchorToPlaintext,
   tokenPriceToPlaintext,
 } from "../../../sdk/plaintext.ts";
@@ -36,6 +38,7 @@ import type {
   Config,
   CreateStreamParams,
   FeeTier,
+  Payroll,
   PayrollConfig,
   StreamAnchor,
   TokenPrice,
@@ -222,7 +225,7 @@ export class WalletPayrollService {
     return this.execute("pause_resume_stream_private", [ticket], fee);
   }
 
-  /** Execute `cancel_private`. */
+  /** Execute `cancel_stream_private`. */
   async cancelStream(
     streamId: string | bigint,
     fee: number = DEFAULT_FEE,
@@ -230,10 +233,10 @@ export class WalletPayrollService {
     const ticket = await this.findTicket("SenderPayrollTicket", streamId);
     const anchor = await this.getStreamAnchor(streamId);
     const inputs = [ticket, streamAnchorToPlaintext(anchor), `${nowSeconds()}i64`];
-    return this.execute("cancel_private", inputs, fee, DYNAMIC_DISPATCH_IMPORTS);
+    return this.execute("cancel_stream_private", inputs, fee, DYNAMIC_DISPATCH_IMPORTS);
   }
 
-  /** Execute `withdraw_private`. */
+  /** Execute `withdraw_stream_private`. */
   async withdraw(
     streamId: string | bigint,
     fee: number = DEFAULT_FEE,
@@ -241,7 +244,29 @@ export class WalletPayrollService {
     const ticket = await this.findTicket("ReceiverPayrollTicket", streamId);
     const anchor = await this.getStreamAnchor(streamId);
     const inputs = [ticket, streamAnchorToPlaintext(anchor), `${nowSeconds()}i64`];
-    return this.execute("withdraw_private", inputs, fee, DYNAMIC_DISPATCH_IMPORTS);
+    return this.execute("withdraw_stream_private", inputs, fee, DYNAMIC_DISPATCH_IMPORTS);
+  }
+
+  /**
+   * Execute `withdraw_stream_auto_private`: pay out the receiver's accrued
+   * amount on behalf of the receiver. Withdrawer only — the withdrawer ticket
+   * record and on-chain anchor are resolved automatically.
+   */
+  async withdrawAuto(
+    streamId: string | bigint,
+    config: Config,
+    fee: number = DEFAULT_FEE,
+  ): Promise<string> {
+    const now = nowSeconds();
+    const ticket = await this.findTicket("WithdrawerPayrollTicket", streamId);
+    const anchor = await this.getStreamAnchor(streamId);
+    const inputs = [
+      ticket,
+      configToPlaintext(config),
+      streamAnchorToPlaintext(anchor),
+      `${now}i64`,
+    ];
+    return this.execute("withdraw_stream_auto_private", inputs, fee, DYNAMIC_DISPATCH_IMPORTS);
   }
 
   /**
@@ -274,6 +299,86 @@ export class WalletPayrollService {
       merkleProofs,
     ];
     return this.execute("topup_stream_private", inputs, fee, DYNAMIC_DISPATCH_IMPORTS);
+  }
+
+  /**
+   * Execute `create_stream_public` through the wallet. The token deposit is
+   * pulled from the signer's public balance (the program calls
+   * `IARC22::transfer_from_public`), so no credit/token records or compliance
+   * proofs are needed — the employer must have approved this program on the
+   * token and hold enough public credits for the fees.
+   */
+  async createStreamPublic(
+    params: CreateStreamParams,
+    adminKey: string,
+    fee: number = DEFAULT_FEE,
+  ): Promise<string> {
+    const config = await this.getConfigInput();
+    const tokenPrice: TokenPrice = {
+      config: CONFIG_NAME,
+      streamToken: TOKEN_PROGRAM,
+      streamTokenPriceUsd: TOKEN_PRICE_USD,
+      aleoPriceUsd: ALEO_PRICE_USD,
+      priceExpiry: nowSeconds() + 3600n,
+      nonce: randomField(),
+    };
+    const priceSignature = signTokenPrice(adminKey, tokenPrice);
+    const { usdValue } = computeStreamFee(
+      params.amount,
+      TOKEN_PRICE_USD,
+      ALEO_PRICE_USD,
+      0n,
+    );
+    const feeBps = await this.resolveFeeBps(usdValue);
+    const inputs = [
+      createStreamParamsToPlaintext(params),
+      identLiteral(TOKEN_PROGRAM),
+      configToPlaintext(config),
+      tokenPriceToPlaintext(tokenPrice),
+      priceSignature,
+      `${feeBps}u64`,
+    ];
+    return this.execute("create_stream_public", inputs, fee, DYNAMIC_DISPATCH_IMPORTS);
+  }
+
+  /** Execute `pause_resume_stream_public` (toggles pause/resume). */
+  async pauseResumeStreamPublic(
+    streamId: string | bigint,
+    fee: number = DEFAULT_FEE,
+  ): Promise<string> {
+    return this.execute("pause_resume_stream_public", [fieldLiteral(streamId)], fee);
+  }
+
+  /** Execute `cancel_stream_public`. Payroll + anchor resolved automatically. */
+  async cancelStreamPublic(
+    streamId: string | bigint,
+    fee: number = DEFAULT_FEE,
+  ): Promise<string> {
+    const now = nowSeconds();
+    const payroll = await this.getPayroll(streamId);
+    const anchor = await this.getStreamAnchor(streamId);
+    const inputs = [
+      payrollToPlaintext(payroll),
+      streamAnchorToPlaintext(anchor),
+      `${now}i64`,
+    ];
+    return this.execute("cancel_stream_public", inputs, fee, DYNAMIC_DISPATCH_IMPORTS);
+  }
+
+  /** Execute `withdraw_stream_public`. Payroll + anchor resolved automatically. */
+  async withdrawPublic(
+    streamId: string | bigint,
+    fee: number = DEFAULT_FEE,
+  ): Promise<string> {
+    const now = nowSeconds();
+    const payroll = await this.getPayroll(streamId);
+    const anchor = await this.getStreamAnchor(streamId);
+    const inputs = [
+      payrollToPlaintext(payroll),
+      streamAnchorToPlaintext(anchor),
+      `${now}i64`,
+    ];
+    return this.execute("withdraw_stream_public", inputs, fee, DYNAMIC_DISPATCH_IMPORTS);
   }
 
   // =======================================================================
@@ -370,6 +475,16 @@ export class WalletPayrollService {
       fieldLiteral(streamId),
     );
     return parseStreamAnchor(value);
+  }
+
+  /** Read and parse `payrolls[streamId]` (public streams only). */
+  async getPayroll(streamId: string | bigint): Promise<Payroll> {
+    const value = await this.networkClient.getProgramMappingValue(
+      PROGRAM_ID,
+      "payrolls",
+      fieldLiteral(streamId),
+    );
+    return parsePayroll(value);
   }
 
   /** Read and parse `payroll_config[configName]`. */
