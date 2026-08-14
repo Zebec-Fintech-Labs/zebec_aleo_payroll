@@ -67,12 +67,14 @@ export class WalletArc22Service {
 
   /** On-chain `allowance(owner, spender) -> u128`. */
   async getAllowance(owner: string, spender: string): Promise<bigint> {
-    return this.viewRead("allowance", [owner, spender]);
+    const output = await this.viewRead("allowance", [owner, spender]);
+    return parseIntLiteral(output);
   }
 
   /** On-chain `balance_of(account) -> u128`. */
   async getBalanceOf(account: string): Promise<bigint> {
-    return this.viewRead("balance_of", [account]);
+    const output = await this.viewRead("balance_of", [account]);
+    return parseIntLiteral(output);
   }
 
   // =======================================================================
@@ -119,14 +121,16 @@ export class WalletArc22Service {
   // Internals
   // =======================================================================
 
-  private async viewRead(functionName: string, inputs: string[]): Promise<bigint> {
+  private async viewRead(functionName: string, inputs: string[]): Promise<string> {
     const source = await this.loadProgramSource(this.tokenProgramId);
-    const response = await this.programManager.run(source, functionName, inputs, false);
-    const outputs = response.getOutputs();
-    if (outputs.length === 0) {
-      throw new Error(`view function ${functionName} returned no outputs`);
-    }
-    return parseIntLiteral(outputs[0]);
+    const output = await this.programManager.execute({
+      program: source,
+      programName: this.tokenProgramId,
+      functionName, inputs,
+      privateFee: false,
+      priorityFee: 0
+    });
+    return output
   }
 
   private async execute(
