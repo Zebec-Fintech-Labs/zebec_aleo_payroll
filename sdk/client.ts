@@ -11,7 +11,7 @@ import {
   type RecordPlaintext,
 } from "@provablehq/sdk/testnet.js";
 
-import { feeTierKey, whitelistKey } from "./hashing.js";
+import { feeTierKey, tokenAllowanceKey, whitelistKey } from "./hashing.js";
 import { computeStreamFee, computeTopupAmount, computeWithdrawableAmount, nowSeconds } from "./math.js";
 import {
   configToPlaintext,
@@ -703,7 +703,7 @@ export interface Arc22ServiceOptions {
 /**
  * High-level interface to an IARC22 token program (e.g.
  * `test_usdcx_stablecoin.aleo`). Exposes `approve` / `unapprove` (the
- * on-chain entry points needed to fund payroll streams) plus offline view
+ * on-chain entry points needed to fund payroll streams) plus direct mapping
  * reads (`getAllowance`, `getBalanceOf`).
  */
 export class Arc22Service {
@@ -718,7 +718,6 @@ export class Arc22Service {
   private readonly proverUri?: string;
   private readonly proverApiKey?: string;
   private readonly proverConsumerId?: string;
-  private readonly programSourceCache = new Map<string, string>();
 
   constructor(options: Arc22ServiceOptions) {
     if (!options.tokenProgram) {
@@ -776,32 +775,58 @@ export class Arc22Service {
   }
 
   // =========================================================================
-  // View reads (offline `run`, no broadcast)
+  // Mapping reads (direct chain queries, no offline program execution)
   // =========================================================================
 
-  /** On-chain `allowance(owner, spender) -> u128`. */
+  /**
+   * On-chain `allowance(owner, spender) -> u128`, read from the IARC22
+   * `allowances` mapping. The mapping key is `hash.bhp256(TokenAllowance {
+   * account: owner, spender })`. Returns `0n` when the key is absent.
+   */
   async getAllowance(owner: string, spender: string): Promise<bigint> {
-    return this.viewRead("allowance", [owner, spender]);
+    const key = tokenAllowanceKey(owner, spender);
+    try {
+      const raw = await this.networkClient.getProgramMappingValue(
+        this.programId,
+        "allowances",
+        key,
+      );
+      return parseIntLiteral(raw);
+    } catch {
+      return 0n;
+    }
   }
 
-  /** On-chain `balance_of(account) -> u128`. */
+  /**
+   * On-chain `balance_of(account) -> u128`, read from the IARC22 `balances`
+   * mapping (falling back to `account` if `balances` is absent). Returns `0n`
+   * when the account has no balance entry.
+   */
   async getBalanceOf(account: string): Promise<bigint> {
-    return this.viewRead("balance_of", [account]);
+    const mappingNames = await this.networkClient.getProgramMappingNames(this.programId);
+    const balanceMappingName = mappingNames.includes("balances")
+      ? "balances"
+      : mappingNames.includes("account")
+        ? "account"
+        : null;
+    if (!balanceMappingName) {
+      throw new Error("No public balance mapping found (no 'balances' or 'account').");
+    }
+    try {
+      const raw = await this.networkClient.getProgramMappingValue(
+        this.programId,
+        balanceMappingName,
+        account,
+      );
+      return parseIntLiteral(raw);
+    } catch {
+      return 0n;
+    }
   }
 
   // =========================================================================
   // Internals
   // =========================================================================
-
-  private async viewRead(functionName: string, inputs: string[]): Promise<bigint> {
-    const source = this.programSource ?? (await this.loadProgramSource(this.programId));
-    const response = await this.programManager.run(source, functionName, inputs, false);
-    const outputs = response.getOutputs();
-    if (outputs.length === 0) {
-      throw new Error(`view function ${functionName} returned no outputs`);
-    }
-    return parseIntLiteral(outputs[0]);
-  }
 
   private async execute(
     functionName: string,
@@ -862,15 +887,5 @@ export class Arc22Service {
       );
     }
     return response.transaction.id;
-  }
-
-  private async loadProgramSource(programId: string): Promise<string> {
-    const provided = this.programImports?.[programId];
-    if (provided !== undefined) return provided;
-    const cached = this.programSourceCache.get(programId);
-    if (cached !== undefined) return cached;
-    const source = await this.networkClient.getProgram(programId);
-    this.programSourceCache.set(programId, source);
-    return source;
   }
 }

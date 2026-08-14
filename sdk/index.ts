@@ -36,6 +36,7 @@ export {
   configNameToField,
   feeTierKey,
   whitelistKey,
+  tokenAllowanceKey,
   tokenPriceMessage,
 } from "./hashing.js";
 

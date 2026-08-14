@@ -2,12 +2,13 @@
  * `WalletArc22Service` — wallet-backed counterpart of the Node
  * `Arc22Service` (sdk/client.ts). `approve` / `unapprove` are executed by the
  * Shield wallet (`executeTransaction`) against the IARC22 token program; the
- * view reads (`getAllowance`, `getBalanceOf`) run the token program's view
- * functions offline via a `ProgramManager` and parse the outputs.
+ * reads (`getAllowance`, `getBalanceOf`) query the token program's mappings
+ * directly via an `AleoNetworkClient`.
  */
 
-import { AleoKeyProvider, AleoNetworkClient, ProgramManager } from "@provablehq/sdk/testnet.js";
+import { AleoNetworkClient } from "@provablehq/sdk/testnet.js";
 
+import { tokenAllowanceKey } from "../../../sdk/hashing.ts";
 import { parseIntLiteral } from "../../../sdk/plaintext.ts";
 import type { PayrollWallet } from "./WalletPayrollService.ts";
 
@@ -21,18 +22,12 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export class WalletArc22Service {
   readonly wallet: PayrollWallet;
   readonly networkClient: AleoNetworkClient;
-  readonly programManager: ProgramManager;
   readonly tokenProgramId: string;
-
-  private readonly programSourceCache = new Map<string, string>();
 
   constructor(wallet: PayrollWallet, tokenProgramId: string = TOKEN_PROGRAM_ID) {
     this.wallet = wallet;
     this.tokenProgramId = tokenProgramId;
     this.networkClient = new AleoNetworkClient(HOST);
-    const keyProvider = new AleoKeyProvider();
-    keyProvider.useCache(true);
-    this.programManager = new ProgramManager(HOST, keyProvider);
   }
 
   get address(): string {
@@ -62,19 +57,55 @@ export class WalletArc22Service {
   }
 
   // =======================================================================
-  // View reads (offline `run`, no broadcast)
+  // Mapping reads (direct chain queries, no offline program execution)
   // =======================================================================
 
-  /** On-chain `allowance(owner, spender) -> u128`. */
+  /**
+   * On-chain `allowance(owner, spender) -> u128`, read from the IARC22
+   * `allowances` mapping. The mapping key is `hash.bhp256(TokenAllowance {
+   * account: owner, spender })`. Returns `0n` when the key is absent.
+   */
   async getAllowance(owner: string, spender: string): Promise<bigint> {
-    const output = await this.viewRead("allowance", [owner, spender]);
-    return parseIntLiteral(output);
+    const key = tokenAllowanceKey(owner, spender);
+    try {
+      const raw = await this.networkClient.getProgramMappingValue(
+        this.tokenProgramId,
+        "allowances",
+        key,
+      );
+      return parseIntLiteral(raw);
+    } catch {
+      return 0n;
+    }
   }
 
-  /** On-chain `balance_of(account) -> u128`. */
+  /**
+   * On-chain `balance_of(account) -> u128`, read from the IARC22 `balances`
+   * mapping (falling back to `account` if `balances` is absent). Returns `0n`
+   * when the account has no balance entry.
+   */
   async getBalanceOf(account: string): Promise<bigint> {
-    const output = await this.viewRead("balance_of", [account]);
-    return parseIntLiteral(output);
+    const mappingNames = await this.networkClient.getProgramMappingNames(
+      this.tokenProgramId,
+    );
+    const balanceMappingName = mappingNames.includes("balances")
+      ? "balances"
+      : mappingNames.includes("account")
+        ? "account"
+        : null;
+    if (!balanceMappingName) {
+      throw new Error("No public balance mapping found (no 'balances' or 'account').");
+    }
+    try {
+      const raw = await this.networkClient.getProgramMappingValue(
+        this.tokenProgramId,
+        balanceMappingName,
+        account,
+      );
+      return parseIntLiteral(raw);
+    } catch {
+      return 0n;
+    }
   }
 
   // =======================================================================
@@ -121,18 +152,6 @@ export class WalletArc22Service {
   // Internals
   // =======================================================================
 
-  private async viewRead(functionName: string, inputs: string[]): Promise<string> {
-    const source = await this.loadProgramSource(this.tokenProgramId);
-    const output = await this.programManager.execute({
-      program: source,
-      programName: this.tokenProgramId,
-      functionName, inputs,
-      privateFee: false,
-      priorityFee: 0
-    });
-    return output
-  }
-
   private async execute(
     functionName: string,
     inputs: string[],
@@ -149,13 +168,5 @@ export class WalletArc22Service {
       throw new Error("wallet did not return a transaction id (rejected?)");
     }
     return result.transactionId;
-  }
-
-  private async loadProgramSource(programId: string): Promise<string> {
-    const cached = this.programSourceCache.get(programId);
-    if (cached !== undefined) return cached;
-    const source = await this.networkClient.getProgram(programId);
-    this.programSourceCache.set(programId, source);
-    return source;
   }
 }

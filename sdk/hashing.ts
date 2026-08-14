@@ -72,6 +72,16 @@ export function whitelistKey(configName: string | bigint, tokenProgram: string):
 }
 
 /**
+ * Mapping key of `allowances` on an IARC22 token for `(owner, spender)` — BHP256
+ * hash of the `TokenAllowance { account, spender }` struct, matching the key the
+ * token's `approve_public` / `transfer_from_public` transitions compute with
+ * `hash.bhp256`. `account` is the owner, `spender` the spender.
+ */
+export function tokenAllowanceKey(owner: string, spender: string): string {
+  return hashPlaintextToField(`{ account: ${owner}, spender: ${spender} }`);
+}
+
+/**
  * The message the config admin signs for a `TokenPrice` — must equal
  * `BHP256::hash_to_field(token_price)` as computed in
  * `create_stream_private`. Returns the canonical field literal.
