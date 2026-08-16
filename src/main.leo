@@ -212,7 +212,7 @@ const MIN_WITHDRAW_FREQUENCY: u64 = 2u64;
 
 // Allowed discrepancy between a caller-provided `now` input and the block
 // timestamp, in seconds.
-const NOW_TOLERANCE: i64 = 5i64;
+const NOW_TOLERANCE: i64 = 5i64 * 60i64; // 5 mins
 
 // The 'test_zebec_payroll_v3' program.
 program test_zebec_payroll_v3.aleo {
