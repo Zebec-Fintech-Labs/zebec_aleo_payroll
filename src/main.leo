@@ -212,10 +212,10 @@ const MIN_WITHDRAW_FREQUENCY: u64 = 2u64;
 
 // Allowed discrepancy between a caller-provided `now` input and the block
 // timestamp, in seconds.
-const NOW_TOLERANCE: i64 = 5i64 * 60i64; // 5 mins
+const NOW_TOLERANCE: i64 = 2i64 * 60i64; // 2 mins
+// The 'test_zebec_payroll_v4' program.
 
-// The 'test_zebec_payroll_v3' program.
-program test_zebec_payroll_v3.aleo {
+program test_zebec_payroll_v4.aleo {
     // Payroll configurations, keyed by unique config name (a BHP256 hash of
     // the off-chain name).
     mapping payroll_configs: field => PayrollConfig;
