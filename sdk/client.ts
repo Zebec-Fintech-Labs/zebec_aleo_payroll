@@ -447,6 +447,11 @@ export class PayrollService {
       "stream_anchors",
       fieldLiteral(streamId),
     );
+
+    if (!value) {
+      throw new Error(`Could not fetch stream anchor for stream Id: ${streamId}`)
+    }
+
     return parseStreamAnchor(value);
   }
 
@@ -457,6 +462,11 @@ export class PayrollService {
       "payrolls",
       fieldLiteral(streamId),
     );
+
+    if (!value) {
+      throw new Error(`Could not fetch payroll for stream Id: ${streamId}`)
+    }
+
     return parsePayroll(value);
   }
 
@@ -467,6 +477,11 @@ export class PayrollService {
       "payroll_configs",
       fieldLiteral(configName),
     );
+
+    if (!value) {
+      throw new Error(`Could not fetch payroll config for config name: ${configName}`)
+    }
+
     return parsePayrollConfig(value);
   }
 
@@ -498,6 +513,12 @@ export class PayrollService {
         "whitelisted_token_programs",
         whitelistKey(configName, tokenProgram),
       );
+
+      if (!value) {
+        console.warn(`Could not find token whitelisted for config: ${configName} and token program: ${tokenProgram}. Using default value.`)
+        return false;
+      }
+
       return parseBoolLiteral(value);
     } catch {
       return false;
