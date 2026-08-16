@@ -58,7 +58,7 @@ const submitTransactionWithRetry = async () => {
         } catch (error) {
             if (error instanceof Error && error.message.includes(`Transaction '${transaction_id}' already exists in the ledger`)) {
                 console.log("Transaction already exists in the ledger.");
-                continue;
+                break;
             }
         }
     }

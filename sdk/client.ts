@@ -639,9 +639,6 @@ export class PayrollService {
       privateFee: options.privateFee ?? false,
       inputs,
       broadcast: true,
-      // preparedProgram: await this.programManager.prepareProgram({
-      //   programName: this.programId, functionName, programImports: imports, ...(this.programSource !== undefined ? { programSource: this.programSource } : {})
-      // }),
       unchecked: false,
       ...(this.programSource !== undefined ? { programSource: this.programSource } : {}),
       ...(Object.keys(imports).length > 0 ? { programImports: imports } : {}),
