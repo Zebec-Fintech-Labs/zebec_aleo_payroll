@@ -18,7 +18,7 @@
  * - RECEIVER_PRIVATE_KEY (required): employee who withdraws.
  */
 
-import { initThreadPool, RecordPlaintext, SealanceMerkleTree } from "@provablehq/sdk/testnet.js";
+import { Address, Field, initThreadPool, RecordPlaintext, SealanceMerkleTree } from "@provablehq/sdk/testnet.js";
 import dotenv from "dotenv";
 import path from "node:path";
 import * as fs from "node:fs";
@@ -26,11 +26,13 @@ import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
 import { setTimeout } from "node:timers/promises";
 import {
+    Arc22Service,
     computeStreamFee,
     configNameToField,
     MAX_FEE_TIERS,
     nowSeconds,
     PayrollClient,
+    PROGRAM_ID,
     signTokenPrice,
     type Config,
     type CreateStreamParams,
@@ -42,19 +44,25 @@ dotenv.config();
 
 await initThreadPool();
 
-const PRIVATE_KEY = process.env.PRIVATE_KEY;
+const ADMIN_PRIVATE_KEY = process.env.ADMIN_PRIVATE_KEY;
+const SENDER_PRIVATE_KEY = process.env.SENDER_PRIVATE_KEY;
 const RECEIVER_PRIVATE_KEY = process.env.RECEIVER_PRIVATE_KEY;
 
-if (!PRIVATE_KEY) {
-    console.error("PRIVATE_KEY environment variable is not set.");
+if (!ADMIN_PRIVATE_KEY) {
+    console.error("ADMIN_PRIVATE_KEY environment variable is not set.");
     process.exit(1);
 }
+
+if (!SENDER_PRIVATE_KEY) {
+    console.error("SENDER_PRIVATE_KEY environment variable is not set.");
+    process.exit(1);
+}
+
 if (!RECEIVER_PRIVATE_KEY) {
     console.error("RECEIVER_PRIVATE_KEY environment variable is not set.");
     process.exit(1);
 }
 // Checked above; bind so closures (e.g. createSignedTokenPrice) see `string`.
-const SENDER_PRIVATE_KEY: string = PRIVATE_KEY;
 const HOST = process.env.ENDPOINT ?? "https://api.explorer.provable.com/v1";
 console.log("HOST:", HOST);
 const FREEZE_LIST_URL =
@@ -76,7 +84,7 @@ if (PROVER_URI) {
 
 const senderClient = new PayrollClient({
     host: HOST,
-    privateKey: PRIVATE_KEY,
+    privateKey: SENDER_PRIVATE_KEY,
     programSource: PROGRAM_SOURCE,
     proverUri: PROVER_URI,
     proverApiKey: PROVER_API_KEY,
@@ -107,7 +115,7 @@ const ALEO_PRICE_USD = 200_000n; // $0.20, 6 decimals
 
 const STREAM_PARAMS: CreateStreamParams = {
     receiver,
-    streamId: BigInt("0x" + randomBytes(16).toString("hex")),
+    streamId: randomField(),
     amount: 2_000_000n,
     startTime: 0n, // ignored: startNow is true
     duration: 10n * 60n, // 10 minutes
@@ -119,6 +127,14 @@ const STREAM_PARAMS: CreateStreamParams = {
     canTopup: false,
     initialBufferAmount: 0n,
 };
+
+/** Random 128-bit field value (stream ids). */
+export function randomField(): bigint {
+    const bytes = Field.random().toBytesLe();
+    return BigInt(
+        "0x" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(""),
+    );
+}
 
 async function waitForConfirmation(txId: string) {
     const confirmation = await senderClient.networkClient.waitForTransactionConfirmation(txId, 2_000, 600_000);
@@ -165,9 +181,9 @@ function createSignedTokenPrice(): { tokenPrice: TokenPrice; signature: string }
         streamTokenPriceUsd: TOKEN_PRICE_USD,
         aleoPriceUsd: ALEO_PRICE_USD,
         priceExpiry: nowSeconds() + 3600n,
-        nonce: BigInt("0x" + randomBytes(16).toString("hex")),
+        nonce: randomField(),
     };
-    return { tokenPrice, signature: signTokenPrice(SENDER_PRIVATE_KEY, tokenPrice) };
+    return { tokenPrice, signature: signTokenPrice(ADMIN_PRIVATE_KEY!, tokenPrice) };
 }
 
 /**
@@ -190,8 +206,9 @@ async function getComplianceProofs(senderAddress: string): Promise<[MerkleProof,
     ];
 }
 
-async function createStream(): Promise<string | bigint> {
+async function createStreamPrivate(): Promise<string | bigint> {
     const params = STREAM_PARAMS;
+    console.log("streamId:", params.streamId);
     const config = await getConfigInput();
     const { tokenPrice, signature } = createSignedTokenPrice();
     // usdValue does not depend on feeBps; resolve the tier from it, then fee.
@@ -227,6 +244,7 @@ async function createStream(): Promise<string | bigint> {
     );
     console.log("Create stream transaction ID:", txId);
     await waitForConfirmation(txId);
+    await setTimeout(60000);
     const anchor = await senderClient.getStreamAnchor(params.streamId);
     console.log("Created stream anchor:", anchor);
     return params.streamId;
@@ -234,6 +252,7 @@ async function createStream(): Promise<string | bigint> {
 
 async function createStreamPublic(): Promise<string | bigint> {
     const params = STREAM_PARAMS;
+    console.log("streamId:", params.streamId);
     const config = await getConfigInput();
     const { tokenPrice, signature } = createSignedTokenPrice();
     const { usdValue } = computeStreamFee(
@@ -243,9 +262,31 @@ async function createStreamPublic(): Promise<string | bigint> {
         0n,
     );
     const feeBps = await resolveFeeBps(usdValue);
-    // Prerequisite: the employer must have called `approve_public` on the token
-    // program, approving this payroll program for at least `deposit_amount`,
-    // and hold enough public credits for the fees. No records/proofs needed.
+    // `create_stream_public` pulls the deposit via `transfer_from_public`,
+    // which requires this payroll program to be approved as the spender first.
+    // Check the on-chain allowance and approve if it is too low.
+    const depositAmount = params.canTopup ? params.initialBufferAmount : params.amount;
+    const programAddress = Address.fromProgramId(PROGRAM_ID).toString();
+    const tokenService = new Arc22Service({
+        tokenProgram: TOKEN_PROGRAM,
+        privateKey: SENDER_PRIVATE_KEY,
+        host: HOST,
+        proverUri: PROVER_URI,
+        proverApiKey: PROVER_API_KEY,
+        proverConsumerId: PROVER_CONSUMER_ID,
+    });
+    const allowance = await tokenService.getAllowance(sender, programAddress);
+    if (allowance < depositAmount) {
+        console.log(
+            `Allowance ${allowance} < deposit ${depositAmount}; approving ${PROGRAM_ID} for ${depositAmount}...`,
+        );
+        const approveTxId = await tokenService.approve(programAddress, depositAmount, { priorityFee: 0.1 });
+        await waitForConfirmation(approveTxId);
+        console.log("Approved payroll program to spend tokens:", approveTxId);
+    } else {
+        console.log(`Allowance ${allowance} already covers deposit ${depositAmount}; no approval needed.`);
+    }
+    // The employer must hold enough public credits for the fees. No records/proofs needed.
     const txId = await senderClient.createStreamPublic(
         params,
         TOKEN_PROGRAM,
@@ -257,6 +298,7 @@ async function createStreamPublic(): Promise<string | bigint> {
     );
     console.log("Create public stream transaction ID:", txId);
     await waitForConfirmation(txId);
+    await setTimeout(60000);
     const anchor = await senderClient.getStreamAnchor(params.streamId);
     const payroll = await senderClient.getPayroll(params.streamId);
     console.log("Created public stream anchor:", anchor);
@@ -268,6 +310,7 @@ async function pauseStream(streamId: string | bigint) {
     const txId = await senderClient.pauseResumeStream(streamId, undefined, { priorityFee: 0.1 });
     console.log("Pause stream transaction ID:", txId);
     await waitForConfirmation(txId);
+    await setTimeout(60000);
     const anchor = await senderClient.getStreamAnchor(streamId);
     console.log("Stream paused?", anchor.paused, "at", anchor.lastPausedTime);
 }
@@ -276,6 +319,7 @@ async function resumeStream(streamId: string | bigint) {
     const txId = await senderClient.pauseResumeStream(streamId, undefined, { priorityFee: 0.1 });
     console.log("Resume stream transaction ID:", txId);
     await waitForConfirmation(txId);
+    await setTimeout(60000);
     const anchor = await senderClient.getStreamAnchor(streamId);
     console.log("Stream paused?", anchor.paused, "paused interval:", anchor.pausedInterval);
 }
@@ -284,6 +328,7 @@ async function pauseStreamPublic(streamId: string | bigint) {
     const txId = await senderClient.pauseResumeStreamPublic(streamId, { priorityFee: 0.1 });
     console.log("Pause public stream transaction ID:", txId);
     await waitForConfirmation(txId);
+    await setTimeout(60000);
     const anchor = await senderClient.getStreamAnchor(streamId);
     console.log("Public stream paused?", anchor.paused, "at", anchor.lastPausedTime);
 }
@@ -292,6 +337,7 @@ async function resumeStreamPublic(streamId: string | bigint) {
     const txId = await senderClient.pauseResumeStreamPublic(streamId, { priorityFee: 0.1 });
     console.log("Resume public stream transaction ID:", txId);
     await waitForConfirmation(txId);
+    await setTimeout(60000);
     const anchor = await senderClient.getStreamAnchor(streamId);
     console.log("Public stream paused?", anchor.paused, "paused interval:", anchor.pausedInterval);
 }
@@ -302,6 +348,7 @@ async function withdraw(streamId: string | bigint) {
     const txId = await receiverClient.withdraw(streamId, undefined, undefined, { priorityFee: 0.1 });
     console.log("Withdraw transaction ID:", txId);
     await waitForConfirmation(txId);
+    await setTimeout(60000);
     const anchor = await receiverClient.getStreamAnchor(streamId);
     console.log("Withdrawn amount:", anchor.withdrawnAmount);
 }
@@ -312,6 +359,7 @@ async function withdrawPublic(streamId: string | bigint) {
     const txId = await receiverClient.withdrawPublic(streamId, undefined, undefined, { priorityFee: 0.1 });
     console.log("Withdraw public stream transaction ID:", txId);
     await waitForConfirmation(txId);
+    await setTimeout(60000);
     const anchor = await receiverClient.getStreamAnchor(streamId);
     console.log("Public withdrawn amount:", anchor.withdrawnAmount);
 }
@@ -320,6 +368,7 @@ async function cancelStream(streamId: string | bigint) {
     const txId = await senderClient.cancelStream(streamId, undefined, undefined, { priorityFee: 0.1 });
     console.log("Cancel stream transaction ID:", txId);
     await waitForConfirmation(txId);
+    await setTimeout(60000);
     const anchor = await senderClient.getStreamAnchor(streamId);
     console.log("Stream canceled?", anchor.canceled, "at", anchor.canceledAt);
 }
@@ -328,14 +377,16 @@ async function cancelStreamPublic(streamId: string | bigint) {
     const txId = await senderClient.cancelStreamPublic(streamId, undefined, undefined, { priorityFee: 0.1 });
     console.log("Cancel public stream transaction ID:", txId);
     await waitForConfirmation(txId);
+    await setTimeout(60000);
     const anchor = await senderClient.getStreamAnchor(streamId);
     console.log("Public stream canceled?", anchor.canceled, "at", anchor.canceledAt);
 }
 
 async function main() {
     const publicMode = process.env.PUBLIC_STREAM === "1";
+    console.log("Public mode is enabled.");
     let start = Date.now();
-    const streamId = publicMode ? await createStreamPublic() : await createStream();
+    const streamId = publicMode ? await createStreamPublic() : await createStreamPrivate();
     let end = Date.now();
     console.log(`Stream creation took ${(end - start) / 1000} seconds`);
     await setTimeout(5_000);
