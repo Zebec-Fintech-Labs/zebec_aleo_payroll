@@ -312,8 +312,9 @@ program test_zebec_payroll_v3.aleo {
         if (params.auto_withdrawable) {
             assert(params.withdraw_frequency >= MIN_WITHDRAW_FREQUENCY); // minimum is per 2 seconds
 
-            let transaction_fee = (params.duration / safe_withdraw_frequency) * config.base_fee;
-            auto_withdrawal_fee = config.platform_fee + transaction_fee;
+            auto_withdrawal_fee = compute_auto_withdrawal_fee(
+                params.duration, safe_withdraw_frequency, config.base_fee, config.platform_fee
+            );
         }
 
         assert(credit_input_record.microcredits >= auto_withdrawal_fee + stream_fee);
@@ -384,24 +385,15 @@ program test_zebec_payroll_v3.aleo {
 
             // Checks: config & fee re-verification
             let chain_config: PayrollConfig = payroll_configs.get(config.config_name);
-            assert(chain_config.admin == config.admin);
-            assert(chain_config.fee_vault == config.fee_vault);
-            assert(chain_config.withdrawer == config.withdrawer);
-            assert(chain_config.base_fee == config.base_fee);
-            assert(chain_config.platform_fee == config.platform_fee);
+            assert_config_fields(chain_config, config);
 
             // Checks: backend-signed token price
-            // Verify token price has not expired.
-            assert(now < token_price.price_expiry);
             // Verify nonce is not used. (Resolves replay attack)
             let used = token_price_nonces.get_or_use(token_price.nonce, false);
             assert(!used);
             // Consume the nonce so the signed price cannot be replayed.
             token_price_nonces.set(token_price.nonce, true);
-            // The signed price must be for the token actually being streamed.
-            assert(token_price.stream_token == token_program);
-            // The signed price must be bound to this config.
-            assert(token_price.config == config.config_name);
+            assert_token_price_binding(token_price, config, token_program, now);
             // Message the admin signed: token id || prices || expiry || nonce.
             let price_message: field = BHP256::hash_to_field(token_price);
             // Verified on-chain with a Schnorr signature against the config
@@ -441,9 +433,10 @@ program test_zebec_payroll_v3.aleo {
             assert(!stream_anchors.contains(params.stream_id));
 
             let start_time: i64 = params.start_now ? now : params.start_time;
-            let buffer_secs: u64 = ((deposit_amount * params.duration as u128) / params.amount) as u64;
-            let covered_until: i64 = params.can_topup ? start_time + buffer_secs as i64 : 0i64;
-            
+            let covered_until: i64 = compute_buffer_coverage(
+                deposit_amount, params.duration, params.amount, start_time, params.can_topup
+            );
+
             let stream_anchor = StreamAnchor {
                 stream_id: params.stream_id,
                 start_time: start_time,
@@ -491,31 +484,8 @@ program test_zebec_payroll_v3.aleo {
             // Check: Stream has started
             assert(stream.start_time <= now);
 
-            if (stream.paused) {
-                // |--------------|-----|--------------|-------------|
-                // st               ppi                lpt         now
-                let prev_paused_interval: u64 = stream.paused_interval; // may be 0 or value.
-                assert(stream.last_paused_time <= now);
-                let paused_interval = prev_paused_interval + (now as u64 - stream.last_paused_time as u64);
-                let resumed_stream = StreamAnchor {
-                    ..stream
-                };
-                resumed_stream.paused_interval = paused_interval;
-                resumed_stream.paused  = false;
-                resumed_stream.last_paused_time = 0i64;
-                stream_anchors.set(stream_id, resumed_stream);
-            } else {
-                let prev_paused_interval: u64 = stream.paused_interval;
-                let elapsed_duration: u64 = (now as u64 - stream.start_time as u64) - prev_paused_interval;
-                // Check: Stream has not ended
-                assert(elapsed_duration < stream.duration);
-                let paused_stream = StreamAnchor {
-                    ..stream
-                };
-                paused_stream.paused = true;
-                paused_stream.last_paused_time = now;
-                stream_anchors.set(stream_id, paused_stream); 
-            }
+            let updated_stream = apply_pause_toggle(stream, now);
+            stream_anchors.set(stream_id, updated_stream);
         });
     }
 
@@ -576,25 +546,12 @@ program test_zebec_payroll_v3.aleo {
         return (sender_ticket, final {
             let real_now = std::ctx::block_timestamp();
             // Check: Validate now time discrepancy is within 5 seconds
-            assert((real_now - now).abs() <= NOW_TOLERANCE);
+            assert_within_tolerance(real_now, now);
             // Check: Validate the streams exists
             assert(stream_anchors.contains(stream_id));
             let stream = stream_anchors.get(stream_id);
             // Check: Stream anchor matches the provided stream anchor
-            assert(stream.stream_id == stream_id);
-            assert(stream.stream_id == stream_anchor.stream_id);
-            assert(stream.start_time == stream_anchor.start_time);
-            assert(stream.duration == stream_anchor.duration);
-            assert(stream.paused == stream_anchor.paused);
-            assert(stream.canceled == stream_anchor.canceled);
-            assert(stream.deposited_amount == stream_anchor.deposited_amount);
-            assert(stream.covered_until == stream_anchor.covered_until);
-            assert(stream.last_paused_time == stream_anchor.last_paused_time);
-            assert(stream.paused_interval == stream_anchor.paused_interval);
-            assert(stream.withdrawn_amount == stream_anchor.withdrawn_amount);
-            assert(stream.is_public == stream_anchor.is_public);
-            assert(stream.created_timestamp == stream_anchor.created_timestamp);
-            assert(stream.initialized == stream_anchor.initialized);
+            assert_stream_anchor_eq(stream_anchor, stream);
 
             let canceled_stream = StreamAnchor {
                 ..stream
@@ -674,25 +631,12 @@ program test_zebec_payroll_v3.aleo {
         return (updated_ticket, final {
             let real_now = std::ctx::block_timestamp();
             // Check: Validate now time discrepancy is within 5 seconds
-            assert((real_now - now).abs() <= NOW_TOLERANCE);
+            assert_within_tolerance(real_now, now);
             // Check: Validate the streams exists
             assert(stream_anchors.contains(stream_id));
             let stream = stream_anchors.get(stream_id);
             // Check: Stream anchor matches the provided stream anchor
-            assert(stream.stream_id == stream_id);
-            assert(stream.stream_id == stream_anchor.stream_id);
-            assert(stream.start_time == stream_anchor.start_time);
-            assert(stream.duration == stream_anchor.duration);
-            assert(stream.paused == stream_anchor.paused);
-            assert(stream.canceled == stream_anchor.canceled);
-            assert(stream.deposited_amount == stream_anchor.deposited_amount);
-            assert(stream.covered_until == stream_anchor.covered_until);
-            assert(stream.last_paused_time == stream_anchor.last_paused_time);
-            assert(stream.paused_interval == stream_anchor.paused_interval);
-            assert(stream.withdrawn_amount == stream_anchor.withdrawn_amount);
-            assert(stream.is_public == stream_anchor.is_public);
-            assert(stream.created_timestamp == stream_anchor.created_timestamp);
-            assert(stream.initialized == stream_anchor.initialized);
+            assert_stream_anchor_eq(stream_anchor, stream);
 
             let updated_stream = StreamAnchor {
                 ..stream
@@ -759,25 +703,12 @@ program test_zebec_payroll_v3.aleo {
         return (receiver_ticket, final {
             let real_now = std::ctx::block_timestamp();
             // Check: Validate now time discrepancy is within 5 seconds
-            assert((real_now - now).abs() <= NOW_TOLERANCE);
+            assert_within_tolerance(real_now, now);
             // Check: Validate the streams exists
             assert(stream_anchors.contains(stream_id));
             let stream = stream_anchors.get(stream_id);
             // Check: Stream anchor matches the provided stream anchor
-            assert(stream.stream_id == stream_id);
-            assert(stream.stream_id == stream_anchor.stream_id);
-            assert(stream.start_time == stream_anchor.start_time);
-            assert(stream.duration == stream_anchor.duration);
-            assert(stream.paused == stream_anchor.paused);
-            assert(stream.canceled == stream_anchor.canceled);
-            assert(stream.deposited_amount == stream_anchor.deposited_amount);
-            assert(stream.covered_until == stream_anchor.covered_until);
-            assert(stream.last_paused_time == stream_anchor.last_paused_time);
-            assert(stream.paused_interval == stream_anchor.paused_interval);
-            assert(stream.withdrawn_amount == stream_anchor.withdrawn_amount);
-            assert(stream.is_public == stream_anchor.is_public);
-            assert(stream.created_timestamp == stream_anchor.created_timestamp);
-            assert(stream.initialized == stream_anchor.initialized);
+            assert_stream_anchor_eq(stream_anchor, stream);
         
             let withdrawn_amount: u128 = stream.withdrawn_amount + capped_withdrawable_amount;
             let updated_stream = StreamAnchor {
@@ -848,36 +779,19 @@ program test_zebec_payroll_v3.aleo {
         return (withdrawer_ticket, final {
             let real_now = std::ctx::block_timestamp();
             // Check: Validate now time discrepancy is within 5 seconds
-            assert((real_now - now).abs() <= NOW_TOLERANCE);
+            assert_within_tolerance(real_now, now);
 
             // Check: Validate the config exists
             assert(payroll_configs.contains(config.config_name));
             let chain_config = payroll_configs.get(config.config_name);
             // Check: Payroll config matches the provided config
-            assert(chain_config.admin == config.admin);
-            assert(chain_config.fee_vault == config.fee_vault);
-            assert(chain_config.withdrawer == config.withdrawer);
-            assert(chain_config.base_fee == config.base_fee);
-            assert(chain_config.platform_fee == config.platform_fee);
+            assert_config_fields(chain_config, config);
 
             // Check: Validate the streams exists
             assert(stream_anchors.contains(stream_id));
             let stream = stream_anchors.get(stream_id);
             // Check: Stream anchor matches the provided stream anchor
-            assert(stream.stream_id == stream_id);
-            assert(stream.stream_id == stream_anchor.stream_id);
-            assert(stream.start_time == stream_anchor.start_time);
-            assert(stream.duration == stream_anchor.duration);
-            assert(stream.paused == stream_anchor.paused);
-            assert(stream.canceled == stream_anchor.canceled);
-            assert(stream.deposited_amount == stream_anchor.deposited_amount);
-            assert(stream.covered_until == stream_anchor.covered_until);
-            assert(stream.last_paused_time == stream_anchor.last_paused_time);
-            assert(stream.paused_interval == stream_anchor.paused_interval);
-            assert(stream.withdrawn_amount == stream_anchor.withdrawn_amount);
-            assert(stream.is_public == stream_anchor.is_public);
-            assert(stream.created_timestamp == stream_anchor.created_timestamp);
-            assert(stream.initialized == stream_anchor.initialized);
+            assert_stream_anchor_eq(stream_anchor, stream);
         
             let withdrawn_amount: u128 = stream.withdrawn_amount + capped_withdrawable_amount;
             let updated_stream = StreamAnchor {
@@ -919,10 +833,11 @@ program test_zebec_payroll_v3.aleo {
         // auto-withdrawal is disabled, so the divisor must be guarded.
         let safe_withdraw_frequency: u64 = params.withdraw_frequency > 0u64 ? params.withdraw_frequency : DEFAULT_WITHDRAW_FREQUENCY;
         if (params.auto_withdrawable) {
-            assert(params.withdraw_frequency > 0u64);
+            assert(params.withdraw_frequency >= MIN_WITHDRAW_FREQUENCY);
 
-            let transaction_fee = (params.duration / safe_withdraw_frequency) * config.base_fee;
-            auto_withdrawal_fee = config.platform_fee + transaction_fee;
+            auto_withdrawal_fee = compute_auto_withdrawal_fee(
+                params.duration, safe_withdraw_frequency, config.base_fee, config.platform_fee
+            );
         }
 
         // ALEO fees are paid from the signer's public credits balance.
@@ -952,24 +867,15 @@ program test_zebec_payroll_v3.aleo {
 
             // Checks: config & fee re-verification
             let chain_config: PayrollConfig = payroll_configs.get(config.config_name);
-            assert(chain_config.admin == config.admin);
-            assert(chain_config.fee_vault == config.fee_vault);
-            assert(chain_config.withdrawer == config.withdrawer);
-            assert(chain_config.base_fee == config.base_fee);
-            assert(chain_config.platform_fee == config.platform_fee);
+            assert_config_fields(chain_config, config);
 
             // Checks: backend-signed token price
-            // Verify token price has not expired.
-            assert(now < token_price.price_expiry);
             // Verify nonce is not used. (Resolves replay attack)
             let used = token_price_nonces.get_or_use(token_price.nonce, false);
             assert(!used);
             // Consume the nonce so the signed price cannot be replayed.
             token_price_nonces.set(token_price.nonce, true);
-            // The signed price must be for the token actually being streamed.
-            assert(token_price.stream_token == token_program);
-            // The signed price must be bound to this config.
-            assert(token_price.config == config.config_name);
+            assert_token_price_binding(token_price, config, token_program, now);
             // Message the admin signed: token id || prices || expiry || nonce.
             let price_message: field = BHP256::hash_to_field(token_price);
             // Verified on-chain with a Schnorr signature against the config
@@ -1010,8 +916,9 @@ program test_zebec_payroll_v3.aleo {
             assert(!payrolls.contains(params.stream_id));
 
             let start_time: i64 = params.start_now ? now : params.start_time;
-            let buffer_secs: u64 = ((deposit_amount * params.duration as u128) / params.amount) as u64;
-            let covered_until: i64 = params.can_topup ? start_time + buffer_secs as i64 : 0i64;
+            let covered_until: i64 = compute_buffer_coverage(
+                deposit_amount, params.duration, params.amount, start_time, params.can_topup
+            );
 
             let stream_anchor = StreamAnchor {
                 stream_id: params.stream_id,
@@ -1079,31 +986,8 @@ program test_zebec_payroll_v3.aleo {
             // Check: Stream has started
             assert(anchor.start_time <= now);
 
-            if (anchor.paused) {
-                // |--------------|-----|--------------|-------------|
-                // st               ppi                lpt         now
-                let prev_paused_interval: u64 = anchor.paused_interval; // may be 0 or value.
-                assert(anchor.last_paused_time <= now);
-                let paused_interval = prev_paused_interval + (now as u64 - anchor.last_paused_time as u64);
-                let resumed_stream = StreamAnchor {
-                    ..anchor
-                };
-                resumed_stream.paused_interval = paused_interval;
-                resumed_stream.paused  = false;
-                resumed_stream.last_paused_time = 0i64;
-                stream_anchors.set(stream_id, resumed_stream);
-            } else {
-                let prev_paused_interval: u64 = anchor.paused_interval;
-                let elapsed_duration: u64 = (now as u64 - anchor.start_time as u64) - prev_paused_interval;
-                // Check: Stream has not ended
-                assert(elapsed_duration < anchor.duration);
-                let paused_stream = StreamAnchor {
-                    ..anchor
-                };
-                paused_stream.paused = true;
-                paused_stream.last_paused_time = now;
-                stream_anchors.set(stream_id, paused_stream); 
-            }
+            let updated_anchor = apply_pause_toggle(anchor, now);
+            stream_anchors.set(stream_id, updated_anchor);
         };
     }
 
@@ -1163,40 +1047,18 @@ program test_zebec_payroll_v3.aleo {
         return final {
             let real_now = std::ctx::block_timestamp();
             // Check: Validate now time discrepancy is within 5 seconds
-            assert((real_now - now).abs() <= NOW_TOLERANCE);
+            assert_within_tolerance(real_now, now);
             assert(stream_anchor.stream_id == payroll.stream_id);
             // Check: Validate the payroll exists
             assert(payrolls.contains(payroll.stream_id));
             let onchain_payroll = payrolls.get(payroll.stream_id);
             // Check On chain payroll matches the provided payroll
-            assert(onchain_payroll.stream_id == payroll.stream_id);
-            assert(onchain_payroll.config == payroll.config);
-            assert(onchain_payroll.sender == payroll.sender);
-            assert(onchain_payroll.receiver == payroll.receiver);
-            assert(onchain_payroll.full_amount == payroll.full_amount);
-            assert(onchain_payroll.token_program == payroll.token_program);
-            assert(onchain_payroll.is_cancelable == payroll.is_cancelable);
-            assert(onchain_payroll.is_pausable == payroll.is_pausable);
-            assert(onchain_payroll.can_topup == payroll.can_topup);
-            assert(onchain_payroll.auto_withdrawable == payroll.auto_withdrawable);
-            assert(onchain_payroll.topup_count == payroll.topup_count);
+            assert_payroll_eq(payroll, onchain_payroll);
             // Check: Validate the streams exists
             assert(stream_anchors.contains(stream_anchor.stream_id));
             let onchain_anchor = stream_anchors.get(stream_anchor.stream_id);
             // Check: On chain stream anchor matches the provided stream anchor
-            assert(onchain_anchor.stream_id == stream_anchor.stream_id);
-            assert(onchain_anchor.start_time == stream_anchor.start_time);
-            assert(onchain_anchor.duration == stream_anchor.duration);
-            assert(onchain_anchor.paused == stream_anchor.paused);
-            assert(onchain_anchor.canceled == stream_anchor.canceled);
-            assert(onchain_anchor.deposited_amount == stream_anchor.deposited_amount);
-            assert(onchain_anchor.covered_until == stream_anchor.covered_until);
-            assert(onchain_anchor.last_paused_time == stream_anchor.last_paused_time);
-            assert(onchain_anchor.paused_interval == stream_anchor.paused_interval);
-            assert(onchain_anchor.withdrawn_amount == stream_anchor.withdrawn_amount);
-            assert(onchain_anchor.is_public == stream_anchor.is_public);
-            assert(onchain_anchor.created_timestamp == stream_anchor.created_timestamp);
-            assert(onchain_anchor.initialized == stream_anchor.initialized);
+            assert_stream_anchor_eq(stream_anchor, onchain_anchor);
 
             let canceled_stream = StreamAnchor {
                 ..onchain_anchor
@@ -1258,41 +1120,19 @@ program test_zebec_payroll_v3.aleo {
         return final {
             let real_now = std::ctx::block_timestamp();
             // Check: Validate now time discrepancy is within 5 seconds
-            assert((real_now - now).abs() <= NOW_TOLERANCE);
+            assert_within_tolerance(real_now, now);
 
             assert(payroll.stream_id == stream_anchor.stream_id);
             // Check: Validate the payroll exists
             assert(payrolls.contains(payroll.stream_id));
             let onchain_payroll = payrolls.get(payroll.stream_id);
             // Check On chain payroll matches the provided payroll
-            assert(onchain_payroll.stream_id == payroll.stream_id);
-            assert(onchain_payroll.config == payroll.config);
-            assert(onchain_payroll.sender == payroll.sender);
-            assert(onchain_payroll.receiver == payroll.receiver);
-            assert(onchain_payroll.full_amount == payroll.full_amount);
-            assert(onchain_payroll.token_program == payroll.token_program);
-            assert(onchain_payroll.is_cancelable == payroll.is_cancelable);
-            assert(onchain_payroll.is_pausable == payroll.is_pausable);
-            assert(onchain_payroll.can_topup == payroll.can_topup);
-            assert(onchain_payroll.auto_withdrawable == payroll.auto_withdrawable);
-            assert(onchain_payroll.topup_count == payroll.topup_count);
+            assert_payroll_eq(payroll, onchain_payroll);
             // Check: Validate the streams exists
             assert(stream_anchors.contains(stream_anchor.stream_id));
             let onchain_anchor = stream_anchors.get(stream_anchor.stream_id);
             // Check: Stream anchor matches the provided stream anchor
-            assert(onchain_anchor.stream_id == stream_anchor.stream_id);
-            assert(onchain_anchor.start_time == stream_anchor.start_time);
-            assert(onchain_anchor.duration == stream_anchor.duration);
-            assert(onchain_anchor.paused == stream_anchor.paused);
-            assert(onchain_anchor.canceled == stream_anchor.canceled);
-            assert(onchain_anchor.deposited_amount == stream_anchor.deposited_amount);
-            assert(onchain_anchor.covered_until == stream_anchor.covered_until);
-            assert(onchain_anchor.last_paused_time == stream_anchor.last_paused_time);
-            assert(onchain_anchor.paused_interval == stream_anchor.paused_interval);
-            assert(onchain_anchor.withdrawn_amount == stream_anchor.withdrawn_amount);
-            assert(onchain_anchor.is_public == stream_anchor.is_public);
-            assert(onchain_anchor.created_timestamp == stream_anchor.created_timestamp);
-            assert(onchain_anchor.initialized == stream_anchor.initialized);
+            assert_stream_anchor_eq(stream_anchor, onchain_anchor);
         
             let withdrawn_amount: u128 = onchain_anchor.withdrawn_amount + capped_withdrawable_amount;
             let updated_anchor = StreamAnchor {
@@ -1506,4 +1346,111 @@ fn compute_withdrawable_amount(
     assert(total_withdrawable_amount >= withdrawn_amount);
         
     return (total_withdrawable_amount, total_withdrawable_amount - withdrawn_amount);
+}
+
+// Assert every field of `provided` matches `onchain`. Used by cancel/topup/
+// withdraw finals to confirm the caller-supplied anchor equals on-chain state.
+fn assert_stream_anchor_eq(provided: StreamAnchor, onchain: StreamAnchor) {
+    assert(onchain.stream_id == provided.stream_id);
+    assert(onchain.start_time == provided.start_time);
+    assert(onchain.duration == provided.duration);
+    assert(onchain.paused == provided.paused);
+    assert(onchain.canceled == provided.canceled);
+    assert(onchain.canceled_at == provided.canceled_at);
+    assert(onchain.deposited_amount == provided.deposited_amount);
+    assert(onchain.covered_until == provided.covered_until);
+    assert(onchain.last_paused_time == provided.last_paused_time);
+    assert(onchain.paused_interval == provided.paused_interval);
+    assert(onchain.withdrawn_amount == provided.withdrawn_amount);
+    assert(onchain.is_public == provided.is_public);
+    assert(onchain.created_timestamp == provided.created_timestamp);
+    assert(onchain.initialized == provided.initialized);
+}
+
+// Assert every field of `provided` payroll matches `onchain`.
+fn assert_payroll_eq(provided: Payroll, onchain: Payroll) {
+    assert(onchain.stream_id == provided.stream_id);
+    assert(onchain.config == provided.config);
+    assert(onchain.sender == provided.sender);
+    assert(onchain.receiver == provided.receiver);
+    assert(onchain.full_amount == provided.full_amount);
+    assert(onchain.token_program == provided.token_program);
+    assert(onchain.is_cancelable == provided.is_cancelable);
+    assert(onchain.is_pausable == provided.is_pausable);
+    assert(onchain.can_topup == provided.can_topup);
+    assert(onchain.auto_withdrawable == provided.auto_withdrawable);
+    assert(onchain.topup_count == provided.topup_count);
+}
+
+// Assert the on-chain config matches the caller-provided config struct.
+fn assert_config_fields(chain: PayrollConfig, provided: Config) {
+    assert(chain.admin == provided.admin);
+    assert(chain.fee_vault == provided.fee_vault);
+    assert(chain.withdrawer == provided.withdrawer);
+    assert(chain.base_fee == provided.base_fee);
+    assert(chain.platform_fee == provided.platform_fee);
+}
+
+// Read-only binding/expiry checks for the admin-signed token price. The
+// nonce-consume (token_price_nonces) and the Schnorr signature verification
+// (a finalize-context intrinsic) must stay in the final block.
+fn assert_token_price_binding(
+    token_price: TokenPrice,
+    config: Config,
+    token_program: identifier,
+    now: i64,
+) {
+    assert(now < token_price.price_expiry);
+    assert(token_price.stream_token == token_program);
+    assert(token_price.config == config.config_name);
+}
+
+// Assert the caller-supplied `now` is within NOW_TOLERANCE of the on-chain
+// block timestamp.
+fn assert_within_tolerance(real_now: i64, now: i64) {
+    assert((real_now - now).abs() <= NOW_TOLERANCE);
+}
+
+// Apply a pause/resume toggle to `anchor` given the current `now`, returning
+// the updated anchor. The caller performs the `stream_anchors.set`.
+fn apply_pause_toggle(anchor: StreamAnchor, now: i64) -> StreamAnchor {
+    let updated: StreamAnchor = StreamAnchor { ..anchor };
+    if (anchor.paused) {
+        assert(anchor.last_paused_time <= now);
+        let paused_interval = anchor.paused_interval + (now as u64 - anchor.last_paused_time as u64);
+        updated.paused_interval = paused_interval;
+        updated.paused = false;
+        updated.last_paused_time = 0i64;
+    } else {
+        let elapsed_duration: u64 = (now as u64 - anchor.start_time as u64) - anchor.paused_interval;
+        assert(elapsed_duration < anchor.duration);
+        updated.paused = true;
+        updated.last_paused_time = now;
+    }
+    return updated;
+}
+
+// Compute the buffer-mode `covered_until` timestamp for a freshly created
+// stream. `covered_until` is 0 when top-up mode is disabled.
+fn compute_buffer_coverage(
+    deposit_amount: u128,
+    duration: u64,
+    full_amount: u128,
+    start_time: i64,
+    can_topup: bool,
+) -> i64 {
+    let buffer_secs: u64 = ((deposit_amount * duration as u128) / full_amount) as u64;
+    return can_topup ? start_time + buffer_secs as i64 : 0i64;
+}
+
+// Compute the auto-withdrawal fee in microcredits for a stream. The caller is
+// responsible for asserting the withdraw frequency meets the minimum.
+fn compute_auto_withdrawal_fee(
+    duration: u64,
+    safe_withdraw_frequency: u64,
+    base_fee: u64,
+    platform_fee: u64,
+) -> u64 {
+    let transaction_fee: u64 = (duration / safe_withdraw_frequency) * base_fee;
+    return platform_fee + transaction_fee;
 }
