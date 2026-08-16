@@ -14,12 +14,12 @@ if (!PRIVATE_KEY) {
     console.error("PRIVATE_KEY environment variable is not set.");
     process.exit(1);
 }
-const HOST = process.env.ENDPOINT ?? "https://api.explorer.provable.com/v1";
+const HOST = "https://api.explorer.provable.com/v1";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // console.log("Current directory:", here);
 const PROGRAM_SOURCE = fs.readFileSync(
-    path.resolve(here, "../build/test_zebec_payroll_v3/test_zebec_payroll_v3.aleo"),
+    path.resolve(here, "../build/test_zebec_payroll_v4/test_zebec_payroll_v4.aleo"),
     "utf8",
 );
 // console.log("Program source loaded:\n", PROGRAM_SOURCE, "\n");
@@ -65,7 +65,7 @@ const submitTransactionWithRetry = async () => {
 }
 
 const waitForConfirmation = async () => {
-    const transactionStatus = await programManager.networkClient.waitForTransactionConfirmation(transaction_id, 2000, 600_000);
+    const transactionStatus = await programManager.networkClient.waitForTransactionConfirmation(transaction_id);
     console.log("Transaction Status:", transactionStatus.status);
     if (transactionStatus.status.toLowerCase() === "accepted") {
         confirmed = true;

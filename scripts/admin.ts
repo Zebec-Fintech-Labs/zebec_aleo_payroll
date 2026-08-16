@@ -22,7 +22,7 @@ const HOST = "https://api.explorer.provable.com/v1";
 const here = path.dirname(fileURLToPath(import.meta.url));
 console.log("Current directory:", here);
 const PROGRAM_SOURCE = fs.readFileSync(
-    path.resolve(here, "../build/test_zebec_payroll_v3/test_zebec_payroll_v3.aleo"),
+    path.resolve(here, "../build/test_zebec_payroll_v4/test_zebec_payroll_v4.aleo"),
     "utf8",
 );
 

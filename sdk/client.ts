@@ -1,5 +1,5 @@
 /**
- * `PayrollClient` — high-level interface to the `test_zebec_payroll_v3.aleo` program:
+ * `PayrollClient` — high-level interface to the `test_zebec_payroll_v4.aleo` program:
  * stream lifecycle operations, admin configuration, and mapping reads.
  */
 
@@ -46,7 +46,7 @@ import type { WithdrawableAmounts } from "./math.js";
 import type { TicketRecordName } from "./records.js";
 
 export const DEFAULT_ENDPOINT = "https://api.explorer.provable.com/v1";
-export const PROGRAM_ID = "test_zebec_payroll_v3.aleo";
+export const PROGRAM_ID = "test_zebec_payroll_v4.aleo";
 
 export class PayrollService {
   readonly programId: string;

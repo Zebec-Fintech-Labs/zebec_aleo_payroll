@@ -11,7 +11,7 @@
  * Environment variables:
  * - ZEBEC_TEST_PRIVATE_KEY (required): funded testnet private key.
  * - ZEBEC_TEST_HOST (optional): API host, defaults to the testnet explorer.
- * - ZEBEC_DEPLOY=1 (optional): deploy `test_zebec_payroll_v3.aleo` first when it is
+ * - ZEBEC_DEPLOY=1 (optional): deploy `test_zebec_payroll_v4.aleo` first when it is
  *   not found on the network (costs a deployment fee).
  *
  * Stream-lifecycle transactions (create/pause/withdraw/cancel) are not
@@ -45,7 +45,7 @@ const HOST = process.env.ENDPOINT ?? DEFAULT_ENDPOINT;
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 const PROGRAM_SOURCE = readFileSync(
-  path.resolve(here, "../../build/test_zebec_payroll_v3/test_zebec_payroll_v3.aleo"),
+  path.resolve(here, "../../build/test_zebec_payroll_v4/test_zebec_payroll_v4.aleo"),
   "utf8",
 );
 

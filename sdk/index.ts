@@ -1,5 +1,5 @@
 /**
- * zebec-payroll-sdk — TypeScript SDK for the `test_zebec_payroll_v3.aleo` program.
+ * zebec-payroll-sdk — TypeScript SDK for the `test_zebec_payroll_v4.aleo` program.
  */
 
 export {
