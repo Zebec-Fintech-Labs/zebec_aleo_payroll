@@ -71,22 +71,6 @@ interface IARC22 {
     view fn symbol() -> identifier;
 }
 
-// A single fee tier. `min_amount`/`max_amount` are USD values with
-// 6 decimals; `fee` is the fee in basis points charged for stream amounts
-// whose USD value falls in `(min_amount, max_amount]`.
-struct FeeTier {
-    min_amount: u64,
-    max_amount: u64,
-    fee_bps: u64,
-}
-
-// Identifies one fee tier slot of one payroll config. Hashed with BHP256 to
-// form the `fee_tiers` mapping key.
-struct FeeTierKey {
-    config: field,
-    index: u8,
-}
-
 // Identifies one whitelisted token of one payroll config. Hashed with BHP256
 // to form the `whitelisted_tokens` mapping key.
 struct WhitelistKey {
@@ -95,9 +79,9 @@ struct WhitelistKey {
 }
 
 // Program configuration. Multiple config live in this program's
-// `payroll_configs` mapping, each under a unique config name. Fee tiers and
-// whitelisted tokens are stored per config in separate mappings (see
-// `FeeTierKey` / `WhitelistKey`).
+// `payroll_configs` mapping, each under a unique config name. Whitelisted
+// tokens are stored per config in the `whitelisted_token_programs` mapping
+// (keyed by `WhitelistKey`).
 struct PayrollConfig {
     admin: address,
     fee_vault: address,
@@ -159,18 +143,16 @@ struct CreateStreamParams {
     initial_buffer_amount: u128,
 }
 
-struct TokenPrice {
+struct StreamTokenFee {
     // Config this price is signed for. Binds the admin's signature to one
     // payroll config so it cannot be replayed against another config.
     config: field,
-    // Stream token: field,
+    // Stream token: identifier,
     stream_token: identifier,
-    // Admin-signed token price in USD (6 decimals).
-    stream_token_price_usd: u64,
-    // Aleo price in USD (6 decimals)
-    aleo_price_usd: u64,
-    // Unix timestamp after which the signed price is no longer valid.
-    price_expiry: i64,
+    // Admin-signed stream fee amount in microcredits.
+    stream_fee_amount: u64,
+    // Expiry of the this object data
+    expiry: i64,
     // Unique nonce,
     nonce: field,
 }
@@ -189,12 +171,6 @@ struct Config {
 // Usd price decimal scale. Used to resolve floating point value of price
 // by multiplying price by this scale.
 const USD_PRICE_DECIMALS_SCALE: u64 = 1_000_000u64;
-
-// Bps Denominator
-const BPS_DENOMINATOR: u64 = 10_000u64;
-
-// Maximum number of fee tiers supported per payroll config.
-const MAX_FEE_TIERS: u8 = 8u8;
 
 // Maximum u64 value, widened to u128 for range checks on widened arithmetic.
 const U64_MAX: u128 = 18_446_744_073_709_551_615u128;
@@ -219,9 +195,6 @@ program test_zebec_payroll_v4.aleo {
     // Payroll configurations, keyed by unique config name (a BHP256 hash of
     // the off-chain name).
     mapping payroll_configs: field => PayrollConfig;
-    // Fee tiers per config, keyed by BHP256 hash of `FeeTierKey`, looked up
-    // by USD stream value.
-    mapping fee_tiers: field => FeeTier;
     // Whitelisted streaming tokens per config, keyed by BHP256 hash of
     // `WhitelistKey` => allowed).
     mapping whitelisted_token_programs: field => bool;
@@ -230,7 +203,7 @@ program test_zebec_payroll_v4.aleo {
     // Map of stream_id and payroll info
     mapping payrolls: field => Payroll;
     // Map of Token Price nonce => used;
-    mapping token_price_nonces: field => bool;
+    mapping token_fee_nonces: field => bool;
 
     // Sender payroll ticket which can be used for operations like pause/resume/topup/cancel
     record SenderPayrollTicket {
@@ -280,13 +253,12 @@ program test_zebec_payroll_v4.aleo {
         params: CreateStreamParams,
         token_program: identifier,
         config: Config,
-        token_price: TokenPrice,
-        price_signature: signature,
-        fee_bps: u64,
+        token_fee: StreamTokenFee,
+        fee_signature: signature,
         credit_input_record: credits.aleo::credits,
         token_input_record: dyn record,
         sender_merkle_proofs: [MerkleProof; 2]
-    ) -> (SenderPayrollTicket, ReceiverPayrollTicket, WithdrawerPayrollTicket, Final) {
+    ) -> (SenderPayrollTicket, ReceiverPayrollTicket, WithdrawerPayrollTicket, credits.aleo::credits, dyn record, dyn record, Final) {
         let signer: address = std::ctx::signer();
         let self_address: address = std::ctx::addr();
 
@@ -297,13 +269,6 @@ program test_zebec_payroll_v4.aleo {
         assert(deposit_amount > 0u128);
         let token_input_record_amount: u128 = token_input_record.amount as u128;
         assert(token_input_record_amount >= deposit_amount);
-
-        let (usd_value, stream_fee) = compute_stream_fee(
-            params.amount, 
-            token_price.stream_token_price_usd, 
-            token_price.aleo_price_usd, 
-            fee_bps
-        );
 
         let auto_withdrawal_fee: u64 = 0u64;
         // Leo flattens `if` branches: the division below executes even when
@@ -317,18 +282,23 @@ program test_zebec_payroll_v4.aleo {
             );
         }
 
-        assert(credit_input_record.microcredits >= auto_withdrawal_fee + stream_fee);
+        assert(credit_input_record.microcredits >= auto_withdrawal_fee + token_fee.stream_fee_amount);
 
-        let (change1, change2): (credits.aleo::credits, credits.aleo::credits) = 
+        let (change1, change2): (credits.aleo::credits, credits.aleo::credits) =
             credits.aleo::split(credit_input_record, auto_withdrawal_fee);
 
         let (auto_change, f_auto_withdrawal_fee_transfer): (credits.aleo::credits, Final) =
             credits.aleo::transfer_private_to_public(change1, config.withdrawer, auto_withdrawal_fee);
-        
-        let (fee_change, f_stream_fee_transfer): (credits.aleo::credits, Final) = 
-            credits.aleo::transfer_private_to_public(change2, config.fee_vault, stream_fee);
-        
-        let (comp, change, f_deposit_amount_transfer): (dyn record, dyn record, Final) =
+
+        // `auto_change` is a 0-value remainder (change1 == auto_withdrawal_fee) and
+        // is intentionally not re-emitted. The leftover ALEO beyond the fees is
+        // `fee_change`, which we return to the signer below so value is not burned.
+        let (fee_change, f_stream_fee_transfer): (credits.aleo::credits, Final) =
+            credits.aleo::transfer_private_to_public(change2, config.fee_vault, token_fee.stream_fee_amount);
+
+        // Return the token change (rest of the sender's balance) and the
+        // compliance record to the signer; discarding them would destroy value.
+        let (deposit_comp, deposit_change, f_deposit_amount_transfer): (dyn record, dyn record, Final) =
             IARC22@(token_program)::transfer_private_to_public(
                 self_address, deposit_amount, token_input_record, sender_merkle_proofs
             );
@@ -370,7 +340,7 @@ program test_zebec_payroll_v4.aleo {
             auto_withdrawable: params.auto_withdrawable,
         };
 
-        return (sender_ticket, receiver_ticket, withdrawer_ticket, final {
+        return (sender_ticket, receiver_ticket, withdrawer_ticket, fee_change, deposit_change, deposit_comp, final {
             let now: i64 = std::ctx::block_timestamp(); 
 
             // Checks: stream parameter validation
@@ -380,27 +350,24 @@ program test_zebec_payroll_v4.aleo {
             assert(params.start_now || params.start_time >= now);
             assert(!params.can_topup || (params.initial_buffer_amount > 0u128 && params.initial_buffer_amount <= params.amount));
 
-            // Checks: fee bps check
-            assert(fee_bps <= BPS_DENOMINATOR);
-
             // Checks: config & fee re-verification
             let chain_config: PayrollConfig = payroll_configs.get(config.config_name);
             assert_config_fields(chain_config, config);
 
             // Checks: backend-signed token price
             // Verify nonce is not used. (Resolves replay attack)
-            let used = token_price_nonces.get_or_use(token_price.nonce, false);
+            let used = token_fee_nonces.get_or_use(token_fee.nonce, false);
             assert(!used);
             // Consume the nonce so the signed price cannot be replayed.
-            token_price_nonces.set(token_price.nonce, true);
-            assert_token_price_binding(token_price, config, token_program, now);
+            token_fee_nonces.set(token_fee.nonce, true);
+            assert_token_fee_binding(token_fee, config, token_program, now);
             // Message the admin signed: token id || prices || expiry || nonce.
-            let price_message: field = BHP256::hash_to_field(token_price);
+            let fee_message: field = BHP256::hash_to_field(token_fee);
             // Verified on-chain with a Schnorr signature against the config
             // admin's public key.
-            let price_valid: bool =
-                std::sig::verify_schnorr(price_signature, config.admin, price_message);
-            assert(price_valid);
+            let fee_valid: bool =
+                std::sig::verify_schnorr(fee_signature, config.admin, fee_message);
+            assert(fee_valid);
 
             // Checks: token whitelist (scoped to this config)
             let whitelist_key: field = BHP256::hash_to_field(
@@ -408,26 +375,6 @@ program test_zebec_payroll_v4.aleo {
             );
             let allowed = whitelisted_token_programs.get_or_use(whitelist_key, false);
             assert(allowed);
-
-            // Checks: fee tier for the stream's USD value
-            let tier_found: bool = false;
-            let tier_fee: u64 = 0u64;
-            for i: u8 in 0u8..MAX_FEE_TIERS {
-                let tier_key: field = BHP256::hash_to_field(
-                    FeeTierKey { config: config.config_name, index: i },
-                );
-                let tier: FeeTier = fee_tiers.get_or_use(
-                    tier_key,
-                    FeeTier { min_amount: 0u64, max_amount: 0u64, fee_bps: 0u64 },
-                );
-                let matches: bool = !tier_found
-                    && usd_value > tier.min_amount
-                    && usd_value <= tier.max_amount;
-                tier_found = tier_found || matches;
-                tier_fee = matches ? tier.fee_bps : tier_fee;
-            }
-            assert(tier_found);
-            assert(tier_fee == fee_bps);
 
             // Checks: stream id is fresh
             assert(!stream_anchors.contains(params.stream_id));
@@ -547,6 +494,9 @@ program test_zebec_payroll_v4.aleo {
             let real_now = std::ctx::block_timestamp();
             // Check: Validate now time discrepancy is within 5 seconds
             assert_within_tolerance(real_now, now);
+            // Reject a caller-supplied `now` in the future: otherwise accrual
+            // (and buffer debt in topup) could be inflated by up to NOW_TOLERANCE.
+            assert(now <= real_now);
             // Check: Validate the streams exists
             assert(stream_anchors.contains(stream_id));
             let stream = stream_anchors.get(stream_id);
@@ -632,6 +582,9 @@ program test_zebec_payroll_v4.aleo {
             let real_now = std::ctx::block_timestamp();
             // Check: Validate now time discrepancy is within 5 seconds
             assert_within_tolerance(real_now, now);
+            // Reject a caller-supplied `now` in the future: otherwise accrual
+            // (and buffer debt in topup) could be inflated by up to NOW_TOLERANCE.
+            assert(now <= real_now);
             // Check: Validate the streams exists
             assert(stream_anchors.contains(stream_id));
             let stream = stream_anchors.get(stream_id);
@@ -677,8 +630,13 @@ program test_zebec_payroll_v4.aleo {
         assert(stream_anchor.withdrawn_amount < ticket_record.full_amount);
         assert(stream_anchor.deposited_amount > stream_anchor.withdrawn_amount);
 
+        // Buffer mode (covered_until > 0): do not accrue past the funded
+        // coverage window. Without this the receiver could drain the whole
+        // initial buffer instantly, defeating buffer-mode capital protection.
+        let accrual_time: i64 = (stream_anchor.covered_until > 0i64 && effective_time > stream_anchor.covered_until) ? stream_anchor.covered_until : effective_time;
+
         let (total_withdrawable_amount, currently_withdrawable_amount) = compute_withdrawable_amount(
-            effective_time,
+            accrual_time,
             stream_anchor.start_time,
             stream_anchor.duration,
             stream_anchor.paused_interval,
@@ -692,7 +650,7 @@ program test_zebec_payroll_v4.aleo {
         // accrued beyond the deposit stay locked until the next top-up.
         let capped_withdrawable_amount: u128 = currently_withdrawable_amount <= available_withdraw_amount ? currently_withdrawable_amount : available_withdraw_amount;
 
-        let (comp, token, f_receiver_amount_transfer) 
+        let (comp, token, f_receiver_amount_transfer)
             = IARC22@(ticket_record.token_program)::transfer_from_public_to_private(
                 self_address, ticket_record.owner, capped_withdrawable_amount
             );
@@ -704,6 +662,9 @@ program test_zebec_payroll_v4.aleo {
             let real_now = std::ctx::block_timestamp();
             // Check: Validate now time discrepancy is within 5 seconds
             assert_within_tolerance(real_now, now);
+            // Reject a caller-supplied `now` in the future: otherwise accrual
+            // (and buffer debt in topup) could be inflated by up to NOW_TOLERANCE.
+            assert(now <= real_now);
             // Check: Validate the streams exists
             assert(stream_anchors.contains(stream_id));
             let stream = stream_anchors.get(stream_id);
@@ -751,8 +712,11 @@ program test_zebec_payroll_v4.aleo {
         assert(stream_anchor.withdrawn_amount < ticket_record.full_amount);
         assert(stream_anchor.deposited_amount > stream_anchor.withdrawn_amount);
 
+        // Buffer mode: cap accrual at the funded coverage window.
+        let accrual_time: i64 = (stream_anchor.covered_until > 0i64 && effective_time > stream_anchor.covered_until) ? stream_anchor.covered_until : effective_time;
+
         let (total_withdrawable_amount, currently_withdrawable_amount) = compute_withdrawable_amount(
-            effective_time,
+            accrual_time,
             stream_anchor.start_time,
             stream_anchor.duration,
             stream_anchor.paused_interval,
@@ -768,7 +732,7 @@ program test_zebec_payroll_v4.aleo {
         // Check: There is something to pay out (skip dust/zero auto-withdrawals)
         assert(capped_withdrawable_amount > 0u128);
 
-        let (comp, token, f_receiver_amount_transfer) 
+        let (comp, token, f_receiver_amount_transfer)
             = IARC22@(ticket_record.token_program)::transfer_from_public_to_private(
                 self_address, ticket_record.receiver, capped_withdrawable_amount
             );
@@ -780,6 +744,9 @@ program test_zebec_payroll_v4.aleo {
             let real_now = std::ctx::block_timestamp();
             // Check: Validate now time discrepancy is within 5 seconds
             assert_within_tolerance(real_now, now);
+            // Reject a caller-supplied `now` in the future: otherwise accrual
+            // (and buffer debt in topup) could be inflated by up to NOW_TOLERANCE.
+            assert(now <= real_now);
 
             // Check: Validate the config exists
             assert(payroll_configs.contains(config.config_name));
@@ -808,9 +775,8 @@ program test_zebec_payroll_v4.aleo {
         params: CreateStreamParams,
         token_program: identifier,
         config: Config,
-        token_price: TokenPrice,
-        price_signature: signature,
-        fee_bps: u64,
+        token_fee: StreamTokenFee,
+        fee_signature: signature,
     ) -> Final {
         let signer: address = std::ctx::signer();
         let self_address: address = std::ctx::addr();
@@ -820,13 +786,6 @@ program test_zebec_payroll_v4.aleo {
 
         let deposit_amount: u128 = params.can_topup ? params.initial_buffer_amount: params.amount;
         assert(deposit_amount > 0u128);
-
-        let (usd_value, stream_fee) = compute_stream_fee(
-            params.amount, 
-            token_price.stream_token_price_usd, 
-            token_price.aleo_price_usd, 
-            fee_bps
-        );
 
         let auto_withdrawal_fee: u64 = 0u64;
         // Leo flattens `if` branches: the division below executes even when
@@ -842,7 +801,7 @@ program test_zebec_payroll_v4.aleo {
 
         // ALEO fees are paid from the signer's public credits balance.
         let f_stream_fee_transfer: Final =
-            credits.aleo::transfer_public_as_signer(config.fee_vault, stream_fee);
+            credits.aleo::transfer_public_as_signer(config.fee_vault, token_fee.stream_fee_amount);
         let f_auto_withdrawal_fee_transfer: Final =
             credits.aleo::transfer_public_as_signer(config.withdrawer, auto_withdrawal_fee);
 
@@ -862,27 +821,24 @@ program test_zebec_payroll_v4.aleo {
             assert(params.start_now || params.start_time >= now);
             assert(!params.can_topup || (params.initial_buffer_amount > 0u128 && params.initial_buffer_amount <= params.amount));
 
-            // Checks: fee bps check
-            assert(fee_bps <= BPS_DENOMINATOR);
-
             // Checks: config & fee re-verification
             let chain_config: PayrollConfig = payroll_configs.get(config.config_name);
             assert_config_fields(chain_config, config);
 
             // Checks: backend-signed token price
             // Verify nonce is not used. (Resolves replay attack)
-            let used = token_price_nonces.get_or_use(token_price.nonce, false);
+            let used = token_fee_nonces.get_or_use(token_fee.nonce, false);
             assert(!used);
             // Consume the nonce so the signed price cannot be replayed.
-            token_price_nonces.set(token_price.nonce, true);
-            assert_token_price_binding(token_price, config, token_program, now);
-            // Message the admin signed: token id || prices || expiry || nonce.
-            let price_message: field = BHP256::hash_to_field(token_price);
+            token_fee_nonces.set(token_fee.nonce, true);
+            assert_token_fee_binding(token_fee, config, token_program, now);
+            // Message the admin signed.
+            let fee_message: field = BHP256::hash_to_field(token_fee);
             // Verified on-chain with a Schnorr signature against the config
             // admin's public key.
-            let price_valid: bool =
-                std::sig::verify_schnorr(price_signature, config.admin, price_message);
-            assert(price_valid);
+            let fee_valid: bool =
+                std::sig::verify_schnorr(fee_signature, config.admin, fee_message);
+            assert(fee_valid);
 
             // Checks: token whitelist (scoped to this config)
             let whitelist_key: field = BHP256::hash_to_field(
@@ -890,26 +846,6 @@ program test_zebec_payroll_v4.aleo {
             );
             let allowed = whitelisted_token_programs.get_or_use(whitelist_key, false);
             assert(allowed);
-
-            // Checks: fee tier for the stream's USD value
-            let tier_found: bool = false;
-            let tier_fee: u64 = 0u64;
-            for i: u8 in 0u8..MAX_FEE_TIERS {
-                let tier_key: field = BHP256::hash_to_field(
-                    FeeTierKey { config: config.config_name, index: i },
-                );
-                let tier: FeeTier = fee_tiers.get_or_use(
-                    tier_key,
-                    FeeTier { min_amount: 0u64, max_amount: 0u64, fee_bps: 0u64 },
-                );
-                let matches: bool = !tier_found
-                    && usd_value > tier.min_amount
-                    && usd_value <= tier.max_amount;
-                tier_found = tier_found || matches;
-                tier_fee = matches ? tier.fee_bps : tier_fee;
-            }
-            assert(tier_found);
-            assert(tier_fee == fee_bps);
 
             // Checks: stream id is fresh
             assert(!stream_anchors.contains(params.stream_id));
@@ -1048,6 +984,9 @@ program test_zebec_payroll_v4.aleo {
             let real_now = std::ctx::block_timestamp();
             // Check: Validate now time discrepancy is within 5 seconds
             assert_within_tolerance(real_now, now);
+            // Reject a caller-supplied `now` in the future: otherwise accrual
+            // (and buffer debt in topup) could be inflated by up to NOW_TOLERANCE.
+            assert(now <= real_now);
             assert(stream_anchor.stream_id == payroll.stream_id);
             // Check: Validate the payroll exists
             assert(payrolls.contains(payroll.stream_id));
@@ -1097,8 +1036,11 @@ program test_zebec_payroll_v4.aleo {
         assert(stream_anchor.withdrawn_amount < payroll.full_amount);
         assert(stream_anchor.deposited_amount > stream_anchor.withdrawn_amount);
 
+        // Buffer mode: cap accrual at the funded coverage window.
+        let accrual_time: i64 = (stream_anchor.covered_until > 0i64 && effective_time > stream_anchor.covered_until) ? stream_anchor.covered_until : effective_time;
+
         let (total_withdrawable_amount, currently_withdrawable_amount) = compute_withdrawable_amount(
-            effective_time,
+            accrual_time,
             stream_anchor.start_time,
             stream_anchor.duration,
             stream_anchor.paused_interval,
@@ -1112,7 +1054,7 @@ program test_zebec_payroll_v4.aleo {
         // accrued beyond the deposit stay locked until the next top-up.
         let capped_withdrawable_amount: u128 = currently_withdrawable_amount <= available_withdraw_amount ? currently_withdrawable_amount : available_withdraw_amount;
 
-        let f_receiver_amount_transfer: Final 
+        let f_receiver_amount_transfer: Final
             = IARC22@(payroll.token_program)::transfer_from_public(
                 self_address, payroll.receiver, capped_withdrawable_amount
             );
@@ -1121,6 +1063,9 @@ program test_zebec_payroll_v4.aleo {
             let real_now = std::ctx::block_timestamp();
             // Check: Validate now time discrepancy is within 5 seconds
             assert_within_tolerance(real_now, now);
+            // Reject a caller-supplied `now` in the future: otherwise accrual
+            // (and buffer debt in topup) could be inflated by up to NOW_TOLERANCE.
+            assert(now <= real_now);
 
             assert(payroll.stream_id == stream_anchor.stream_id);
             // Check: Validate the payroll exists
@@ -1213,36 +1158,6 @@ program test_zebec_payroll_v4.aleo {
         };
     }
 
-    // Set or replace a fee tier of a payroll config. Config admin only.
-    fn set_fee_tier(
-        config_name: field,
-        index: u8,
-        min_amount: u64,
-        max_amount: u64,
-        fee_bps: u64,
-    ) -> Final {
-        let caller: address = std::ctx::caller();
-        // Tiers must be well-formed: a non-empty range and a fee within 100%.
-        assert(min_amount < max_amount);
-        assert(fee_bps <= BPS_DENOMINATOR);
-        let tier_key: field = BHP256::hash_to_field(
-            FeeTierKey { config: config_name, index: index },
-        );
-        return final {
-            let config: PayrollConfig = payroll_configs.get(config_name);
-            assert(config.admin == caller);
-            assert(index < MAX_FEE_TIERS);
-            fee_tiers.set(
-                tier_key,
-                FeeTier {
-                    min_amount: min_amount,
-                    max_amount: max_amount,
-                    fee_bps: fee_bps,
-                },
-            );
-        };
-    }
-
     // Whitelist or de-whitelist a streaming token for a payroll config.
     // Config admin only.
     fn set_token_whitelisted(
@@ -1267,15 +1182,6 @@ program test_zebec_payroll_v4.aleo {
         return payroll_configs.get(config_name);
     }
 
-    view fn get_fee_tier(config_name: field, index: u8) -> FeeTier {
-        assert(index < MAX_FEE_TIERS);
-        let tier_key: field = BHP256::hash_to_field(
-            FeeTierKey { config: config_name, index: index },
-        );
-        assert(fee_tiers.contains(tier_key));
-        return fee_tiers.get(tier_key);
-    }
-
     view fn is_token_whitelisted(config_name: field, token_program: identifier) -> bool {
         let whitelist_key: field = BHP256::hash_to_field(
             WhitelistKey { config: config_name, token_program: token_program },
@@ -1293,25 +1199,6 @@ program test_zebec_payroll_v4.aleo {
     // For more information, please refer to the documentation: `https://docs.leo-lang.org/guides/upgradability`
     @admin(address="aleo12czxn500cyj9a7lweuft6r4rrckthfck5k8440qh7atgrnt5kupqsfh038")
     constructor() {}
-}
-
-// Compute the USD value of a stream amount and the stream fee in microcredits.
-// Returns (usd_value, stream_fee).
-fn compute_stream_fee(
-    amount: u128,
-    token_price_usd: u64,
-    aleo_price_usd: u64,
-    fee_bps: u64,
-) -> (u64, u64) {
-    // Widen to u128 for the intermediate products so large streams cannot
-    // overflow, and assert the results fit in u64 instead of silently
-    // truncating them with a down-cast.
-    let usd_value: u128 = (amount * token_price_usd as u128) / USD_PRICE_DECIMALS_SCALE as u128;
-    let fee_usd: u128 = (usd_value * fee_bps as u128) / BPS_DENOMINATOR as u128;
-    let stream_fee: u128 = (fee_usd * USD_PRICE_DECIMALS_SCALE as u128) / aleo_price_usd as u128;
-    assert(usd_value <= U64_MAX);
-    assert(stream_fee <= U64_MAX);
-    return (usd_value as u64, stream_fee as u64);
 }
 
 // Compute the total withdrawable and currently withdrawable amount for a stream
@@ -1392,17 +1279,17 @@ fn assert_config_fields(chain: PayrollConfig, provided: Config) {
 }
 
 // Read-only binding/expiry checks for the admin-signed token price. The
-// nonce-consume (token_price_nonces) and the Schnorr signature verification
+// nonce-consume (token_fee_nonces) and the Schnorr signature verification
 // (a finalize-context intrinsic) must stay in the final block.
-fn assert_token_price_binding(
-    token_price: TokenPrice,
+fn assert_token_fee_binding(
+    token_fee: StreamTokenFee,
     config: Config,
     token_program: identifier,
     now: i64,
 ) {
-    assert(now < token_price.price_expiry);
-    assert(token_price.stream_token == token_program);
-    assert(token_price.config == config.config_name);
+    assert(now < token_fee.expiry);
+    assert(token_fee.stream_token == token_program);
+    assert(token_fee.config == config.config_name);
 }
 
 // Assert the caller-supplied `now` is within NOW_TOLERANCE of the on-chain
@@ -1417,8 +1304,12 @@ fn apply_pause_toggle(anchor: StreamAnchor, now: i64) -> StreamAnchor {
     let updated: StreamAnchor = StreamAnchor { ..anchor };
     if (anchor.paused) {
         assert(anchor.last_paused_time <= now);
-        let paused_interval = anchor.paused_interval + (now as u64 - anchor.last_paused_time as u64);
+        let paused_span: u64 = now as u64 - anchor.last_paused_time as u64;
+        let paused_interval = anchor.paused_interval + paused_span;
         updated.paused_interval = paused_interval;
+        // Extend the stream's end time by the paused span so the employee still
+        // receives the full amount after a pause (accrual subtracts paused_interval).
+        updated.duration = anchor.duration + paused_span;
         updated.paused = false;
         updated.last_paused_time = 0i64;
     } else {
