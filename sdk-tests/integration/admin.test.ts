@@ -4,8 +4,8 @@
  * These run only when `ZEBEC_TEST_PRIVATE_KEY` is set to a funded testnet
  * private key. They exercise the admin configuration lifecycle end-to-end:
  *
- *   (optionally deploy) -> initialize_config -> set_fee_tier
- *   -> set_token_whitelisted -> update_config, verifying state via the
+ *   (optionally deploy) -> initialize_config -> set_token_whitelisted
+ *   -> update_config, verifying state via the
  *   client's read methods after each step.
  *
  * Environment variables:
@@ -68,7 +68,6 @@ describe("testnet integration: admin lifecycle", function () {
     programSource: PROGRAM_SOURCE,
   });
   const admin = client.account!.address().to_string();
-  const TIER = { minAmount: 0n, maxAmount: 1_000_000_000n, feeBps: 25n };
   const TOKEN = "my_token";
 
   async function waitForConfirmation(txId: string) {
@@ -85,12 +84,6 @@ describe("testnet integration: admin lifecycle", function () {
     assert.equal(config.baseFee, 1_000n);
     assert.equal(config.platformFee, 2_000n);
     assert.equal(config.initialized, true);
-  });
-
-  it("sets and reads a fee tier", async () => {
-    const txId = await client.setFeeTier(CONFIG_NAME, 0, TIER);
-    await waitForConfirmation(txId);
-    assert.deepEqual(await client.getFeeTier(CONFIG_NAME, 0), TIER);
   });
 
   it("whitelists and de-whitelists a token", async () => {

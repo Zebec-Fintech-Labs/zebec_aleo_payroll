@@ -51,16 +51,7 @@ export function configNameToField(name: string): string {
 }
 
 /**
- * Mapping key of `fee_tiers` for `(config, index)` — BHP256 hash of the
- * `FeeTierKey { config: field, index: u8 }` struct.
- */
-export function feeTierKey(configName: string | bigint, index: number): string {
-  return hashPlaintextToField(
-    `{ config: ${fieldLiteral(configName)}, index: ${index}u8 }`,
-  );
-}
-
-/**
+ * Mapping key of `whitelisted_token_programs` for `(config, token)` — BHP256
  * Mapping key of `whitelisted_token_programs` for `(config, token)` — BHP256
  * hash of the `WhitelistKey { config: field, token_program: identifier }`
  * struct.

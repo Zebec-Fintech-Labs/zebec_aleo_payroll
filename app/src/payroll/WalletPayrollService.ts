@@ -10,12 +10,12 @@ import { Address, AleoNetworkClient, SealanceMerkleTree } from "@provablehq/sdk/
 import type { TransactionStatusResponse } from "@provablehq/aleo-types";
 import type { AleoDeployment } from "@provablehq/aleo-wallet-standard";
 
-import { feeTierKey, whitelistKey } from "../../../sdk/hashing.ts";
+import { whitelistKey } from "../../../sdk/hashing.ts";
 import {
   computeStreamFee,
   computeTopupAmount,
   computeWithdrawableAmount,
-  MAX_FEE_TIERS,
+  DEFAULT_FEE_BPS,
   nowSeconds,
   type WithdrawableAmounts,
 } from "../../../sdk/math.ts";
@@ -25,7 +25,6 @@ import {
   fieldLiteral,
   identLiteral,
   parseBoolLiteral,
-  parseFeeTier,
   parsePayroll,
   parsePayrollConfig,
   parseStreamAnchor,
@@ -37,7 +36,6 @@ import { signTokenPrice } from "../../../sdk/signing.ts";
 import type {
   Config,
   CreateStreamParams,
-  FeeTier,
   Payroll,
   PayrollConfig,
   StreamAnchor,
@@ -422,22 +420,6 @@ export class WalletPayrollService {
     return this.execute("update_config", inputs, fee);
   }
 
-  /** Execute `set_fee_tier` (config admin only). */
-  async setFeeTier(
-    index: number,
-    tier: FeeTier,
-    fee: number = DEFAULT_FEE,
-  ): Promise<string> {
-    const inputs = [
-      fieldLiteral(CONFIG_NAME),
-      `${index}u8`,
-      `${tier.minAmount}u64`,
-      `${tier.maxAmount}u64`,
-      `${tier.feeBps}u64`,
-    ];
-    return this.execute("set_fee_tier", inputs, fee);
-  }
-
   /** Execute `set_token_whitelisted` (config admin only). */
   async setTokenWhitelisted(
     tokenProgram: string,
@@ -508,19 +490,6 @@ export class WalletPayrollService {
       fieldLiteral(configName),
     );
     return parsePayrollConfig(value);
-  }
-
-  /** Read and parse `fee_tiers[feeTierKey(configName, index)]`. */
-  async getFeeTier(configName: string | bigint, index: number): Promise<FeeTier> {
-    const value = await this.networkClient.getProgramMappingValue(
-      PROGRAM_ID,
-      "fee_tiers",
-      feeTierKey(configName, index),
-    );
-    if (!value) {
-      throw new Error(`fee tier not found for config ${configName} at index ${index}`);
-    }
-    return parseFeeTier(value);
   }
 
   /**
@@ -722,20 +691,14 @@ export class WalletPayrollService {
     };
   }
 
-  /** Find the on-chain fee tier matching the stream's USD value. */
-  private async resolveFeeBps(usdValue: bigint): Promise<bigint> {
-    for (let index = 0; index < MAX_FEE_TIERS; index++) {
-      let tier: FeeTier;
-      try {
-        tier = await this.getFeeTier(CONFIG_NAME, index);
-      } catch {
-        break; // no more tiers set
-      }
-      if (usdValue > tier.minAmount && usdValue <= tier.maxAmount) {
-        return tier.feeBps;
-      }
-    }
-    throw new Error(`no fee tier covers stream USD value ${usdValue}`);
+  /**
+   * Resolve the stream fee basis points. The on-chain program no longer has
+   * per-config fee tiers, so a single flat `DEFAULT_FEE_BPS` is used for the
+   * admin-signed stream fee (the `usdValue` argument is accepted for API
+   * compatibility and ignored).
+   */
+  private async resolveFeeBps(_usdValue: bigint): Promise<bigint> {
+    return DEFAULT_FEE_BPS;
   }
 
   /**

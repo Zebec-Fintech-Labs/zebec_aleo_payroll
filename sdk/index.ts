@@ -24,7 +24,6 @@ export {
   parseStreamAnchor,
   parsePayroll,
   parsePayrollConfig,
-  parseFeeTier,
   parseIntLiteral,
   parseBoolLiteral,
   parseFieldLiteral,
@@ -34,7 +33,6 @@ export {
 export {
   hashPlaintextToField,
   configNameToField,
-  feeTierKey,
   whitelistKey,
   tokenAllowanceKey,
   tokenPriceMessage,
@@ -47,7 +45,7 @@ export {
   nowSeconds,
   USD_PRICE_DECIMALS_SCALE,
   BPS_DENOMINATOR,
-  MAX_FEE_TIERS,
+  DEFAULT_FEE_BPS,
 } from "./math.js";
 export type { StreamFee, TopupAmount, WithdrawableAmounts } from "./math.js";
 
@@ -64,7 +62,6 @@ export type {
   Config,
   CreateStreamParams,
   ExecuteOptions,
-  FeeTier,
   MerkleProof,
   Payroll,
   PayrollClientOptions,

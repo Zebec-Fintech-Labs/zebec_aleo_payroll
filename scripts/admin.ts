@@ -73,28 +73,6 @@ async function updatePayrollConfig() {
     console.log("Updated config:", config);
 }
 
-async function setFeeTiers() {
-    const TIERS = [
-        { minAmount: 0n, maxAmount: 1_000_000_000n, feeBps: 25n },
-        { minAmount: 1_000_000_001n, maxAmount: 10_000_000_000n, feeBps: 20n },
-        { minAmount: 10_000_000_001n, maxAmount: 100_000_000_000n, feeBps: 15n }
-    ];
-
-    for (let index = 0; index < TIERS.length; index++) {
-        const tier = TIERS[index];
-        const txId = await client.setFeeTier(CONFIG_NAME, index, tier, {
-            priorityFee: 0.1,
-        });
-        console.log(`Fee tier ${index} transaction ID:`, txId);
-        await waitForConfirmation(txId);
-    }
-
-    for (let index = 0; index < TIERS.length; index++) {
-        const retrievedTier = await client.getFeeTier(CONFIG_NAME, index);
-        console.log(`Retrieved fee tier ${index}:`, retrievedTier);
-    }
-}
-
 async function whitelistTokens() {
     const TOKENS = ["test_usdcx_stablecoin", "test_usad_stablecoin"];
     const ALLOWED = true;
@@ -114,7 +92,6 @@ async function whitelistTokens() {
 async function main() {
     // await initializePayrollConfig();
     // await updatePayrollConfig();
-    await setFeeTiers();
     await whitelistTokens();
 }
 

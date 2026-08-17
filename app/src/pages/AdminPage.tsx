@@ -1,36 +1,28 @@
 import { useCallback, useEffect, useState } from "react";
-import type { FeeTier, PayrollConfig } from "../../../sdk/types.ts";
+import type { PayrollConfig } from "../../../sdk/types.ts";
 import { CONFIG_NAME, DEFAULT_FEE, TOKEN_PROGRAM } from "../config.ts";
 import type { UsePayroll } from "../hooks/usePayroll.ts";
 import { parseBig, parseFee, requirePrefix } from "./form.ts";
 
 interface ConfigState {
   config?: PayrollConfig;
-  tiers: FeeTier[];
   whitelisted?: boolean;
 }
 
 export default function AdminPage({ payroll }: { payroll: UsePayroll }) {
   const { busy, runTx, service } = payroll;
 
-  const [state, setState] = useState<ConfigState>({ tiers: [] });
+  const [state, setState] = useState<ConfigState>({});
   const [readNote, setReadNote] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (service === null) return;
     setReadNote(null);
-    const next: ConfigState = { tiers: [] };
+    const next: ConfigState = {};
     try {
       next.config = await service.getPayrollConfig(CONFIG_NAME);
     } catch {
       setReadNote("payroll config is not initialized on-chain");
-    }
-    for (let index = 0; index < 8; index++) {
-      try {
-        next.tiers.push(await service.getFeeTier(CONFIG_NAME, index));
-      } catch {
-        break;
-      }
     }
     next.whitelisted = await service.isTokenWhitelisted(CONFIG_NAME, TOKEN_PROGRAM);
     setState(next);
@@ -67,31 +59,6 @@ export default function AdminPage({ payroll }: { payroll: UsePayroll }) {
             <dd>{state.config.platformFee.toString()} microcredits</dd>
           </dl>
         )}
-        <h2 style={{ marginTop: "1rem" }}>Fee tiers</h2>
-        {state.tiers.length === 0 ? (
-          <p className="muted">No fee tiers set.</p>
-        ) : (
-          <table className="streams">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Min (USD, 6dp)</th>
-                <th>Max (USD, 6dp)</th>
-                <th>Fee (bps)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {state.tiers.map((t, i) => (
-                <tr key={i}>
-                  <td>{i}</td>
-                  <td>{t.minAmount.toString()}</td>
-                  <td>{t.maxAmount.toString()}</td>
-                  <td>{t.feeBps.toString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
         <p style={{ marginTop: "0.75rem", fontSize: "0.85rem" }}>
           {TOKEN_PROGRAM} whitelisted:{" "}
           {state.whitelisted === undefined ? "?" : state.whitelisted ? "yes" : "no"}
@@ -120,7 +87,6 @@ export default function AdminPage({ payroll }: { payroll: UsePayroll }) {
           }).then(() => refresh())
         }
       />
-      <FeeTierForm busy={busy} runTx={runTx} onDone={refresh} />
       <WhitelistForm busy={busy} runTx={runTx} onDone={refresh} />
     </>
   );
@@ -196,89 +162,6 @@ function ConfigForm({
         <div className="full">
           <button className="action" type="submit" disabled={busy}>
             {busy ? "Working..." : submitLabel}
-          </button>
-          {done && <span className="result" style={{ marginLeft: "0.75rem" }}>confirmed</span>}
-        </div>
-      </form>
-    </section>
-  );
-}
-
-function FeeTierForm({
-  busy,
-  runTx,
-  onDone,
-}: {
-  busy: boolean;
-  runTx: UsePayroll["runTx"];
-  onDone: () => Promise<void>;
-}) {
-  const [index, setIndex] = useState("0");
-  const [minAmount, setMinAmount] = useState("0");
-  const [maxAmount, setMaxAmount] = useState("1000000000");
-  const [feeBps, setFeeBps] = useState("25");
-  const [fee, setFee] = useState(String(DEFAULT_FEE));
-  const [formError, setFormError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
-
-  const handle = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setFormError(null);
-    setDone(false);
-    let idx: number;
-    let tier: FeeTier;
-    let feeMicro: number;
-    try {
-      idx = Number(parseBig(index, "tier index"));
-      if (!Number.isInteger(idx) || idx < 0 || idx > 255) throw new Error("tier index must be 0-255");
-      tier = {
-        minAmount: parseBig(minAmount, "min amount"),
-        maxAmount: parseBig(maxAmount, "max amount"),
-        feeBps: parseBig(feeBps, "fee bps"),
-      };
-      feeMicro = parseFee(fee);
-    } catch (err) {
-      setFormError(err instanceof Error ? err.message : String(err));
-      return;
-    }
-    const ok = await runTx(async (svc) => {
-      const txId = await svc.setFeeTier(idx, tier, feeMicro);
-      await svc.waitForConfirmation(txId);
-    });
-    if (ok !== undefined) {
-      setDone(true);
-      await onDone();
-    }
-  };
-
-  return (
-    <section className="card">
-      <h2>Set fee tier</h2>
-      <form className="grid" onSubmit={handle}>
-        <label className="field">
-          Tier index
-          <input value={index} onChange={(e) => setIndex(e.target.value)} disabled={busy} />
-        </label>
-        <label className="field">
-          Fee (bps)
-          <input value={feeBps} onChange={(e) => setFeeBps(e.target.value)} disabled={busy} />
-        </label>
-        <label className="field">
-          Min amount (USD, 6dp)
-          <input value={minAmount} onChange={(e) => setMinAmount(e.target.value)} disabled={busy} />
-        </label>
-        <label className="field">
-          Max amount (USD, 6dp)
-          <input value={maxAmount} onChange={(e) => setMaxAmount(e.target.value)} disabled={busy} />
-        </label>
-        <label className="field">
-          Tx fee (microcredits)
-          <input value={fee} onChange={(e) => setFee(e.target.value)} disabled={busy} />
-        </label>
-        {formError !== null && <p className="form-error">{formError}</p>}
-        <div className="full">
-          <button className="action" type="submit" disabled={busy}>
-            {busy ? "Working..." : "Set fee tier"}
           </button>
           {done && <span className="result" style={{ marginLeft: "0.75rem" }}>confirmed</span>}
         </div>

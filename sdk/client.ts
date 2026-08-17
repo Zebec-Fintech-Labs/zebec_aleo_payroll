@@ -11,7 +11,7 @@ import {
   type RecordPlaintext,
 } from "@provablehq/sdk/testnet.js";
 
-import { feeTierKey, tokenAllowanceKey, whitelistKey } from "./hashing.js";
+import { tokenAllowanceKey, whitelistKey } from "./hashing.js";
 import { computeStreamFee, computeTopupAmount, computeWithdrawableAmount, nowSeconds } from "./math.js";
 import {
   configToPlaintext,
@@ -20,7 +20,6 @@ import {
   identLiteral,
   merkleProofsToPlaintext,
   parseBoolLiteral,
-  parseFeeTier,
   parseIntLiteral,
   parsePayroll,
   parsePayrollConfig,
@@ -34,7 +33,6 @@ import type {
   Config,
   CreateStreamParams,
   ExecuteOptions,
-  FeeTier,
   MerkleProof,
   Payroll,
   PayrollClientOptions as PayrollServiceOptions,
@@ -408,23 +406,6 @@ export class PayrollService {
     return this.execute("update_config", inputs, options);
   }
 
-  /** Execute `set_fee_tier` (config admin only). */
-  async setFeeTier(
-    configName: string | bigint,
-    index: number,
-    tier: FeeTier,
-    options: ExecuteOptions = {},
-  ): Promise<string> {
-    const inputs = [
-      fieldLiteral(configName),
-      `${index}u8`,
-      `${tier.minAmount}u64`,
-      `${tier.maxAmount}u64`,
-      `${tier.feeBps}u64`,
-    ];
-    return this.execute("set_fee_tier", inputs, options);
-  }
-
   /** Execute `set_token_whitelisted` (config admin only). */
   async setTokenWhitelisted(
     configName: string | bigint,
@@ -483,19 +464,6 @@ export class PayrollService {
     }
 
     return parsePayrollConfig(value);
-  }
-
-  /** Read and parse `fee_tiers[feeTierKey(configName, index)]`. */
-  async getFeeTier(configName: string | bigint, index: number): Promise<FeeTier> {
-    const value = await this.networkClient.getProgramMappingValue(
-      this.programId,
-      "fee_tiers",
-      feeTierKey(configName, index),
-    );
-    if (!value) {
-      throw new Error(`fee tier not found for config ${configName} at index ${index}`);
-    }
-    return parseFeeTier(value);
   }
 
   /**
