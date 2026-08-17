@@ -3,8 +3,8 @@
  * cancel, against the `test_zebec_payroll_v4.aleo` program on testnet.
  *
  * Prerequisites:
- * - Config `Payroll_Config_001` initialized with fee tiers and
- *   `test_usdcx_stablecoin` whitelisted (run `npm run admin` first).
+ * - Config `Payroll_Config_001` initialized (run `npm run admin` first) and
+ *   `test_usdcx_stablecoin` whitelisted.
  * - The employer account (`PRIVATE_KEY`) must hold unspent
  *   `test_usdcx_stablecoin.aleo` Token records covering the stream deposit and
  *   credits.aleo records covering fees.
@@ -29,7 +29,7 @@ import {
     Arc22Service,
     computeStreamFee,
     configNameToField,
-    MAX_FEE_TIERS,
+    DEFAULT_FEE_BPS,
     nowSeconds,
     PayrollClient,
     PROGRAM_ID,
@@ -157,20 +157,14 @@ async function getConfigInput(): Promise<Config> {
     };
 }
 
-/** Find the on-chain fee tier matching the stream's USD value. */
-async function resolveFeeBps(usdValue: bigint): Promise<bigint> {
-    for (let index = 0; index < MAX_FEE_TIERS; index++) {
-        let tier;
-        try {
-            tier = await senderClient.getFeeTier(CONFIG_NAME, index);
-        } catch {
-            break; // no more tiers set
-        }
-        if (usdValue > tier.minAmount && usdValue <= tier.maxAmount) {
-            return tier.feeBps;
-        }
-    }
-    throw new Error(`no fee tier covers stream USD value ${usdValue}`);
+/**
+ * Resolve the stream fee basis points. The on-chain program no longer has
+ * per-config fee tiers, so a single flat `DEFAULT_FEE_BPS` is used for the
+ * admin-signed stream fee (the `usdValue` argument is accepted for API
+ * compatibility and ignored).
+ */
+async function resolveFeeBps(_usdValue: bigint): Promise<bigint> {
+    return DEFAULT_FEE_BPS;
 }
 
 /** Build a fresh admin-signed `TokenPrice` attestation. */

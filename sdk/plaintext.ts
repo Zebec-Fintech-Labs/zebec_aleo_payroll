@@ -13,7 +13,6 @@ import { Field, Plaintext } from "@provablehq/sdk/testnet.js";
 import type {
   Config,
   CreateStreamParams,
-  FeeTier,
   MerkleProof,
   Payroll,
   PayrollConfig,
@@ -258,15 +257,4 @@ export function parsePayrollConfig(plaintext: string): PayrollConfig {
   };
 }
 
-/** Parse a `FeeTier` mapping value. */
-export function parseFeeTier(plaintext: string): FeeTier {
-  if (!plaintext) {
-    throw new Error("value is empty: " + plaintext);
-  }
-  const m = parseStructMembers(plaintext);
-  return {
-    minAmount: parseIntLiteral(requireMember(m, "min_amount")),
-    maxAmount: parseIntLiteral(requireMember(m, "max_amount")),
-    feeBps: parseIntLiteral(requireMember(m, "fee_bps")),
-  };
-}
+

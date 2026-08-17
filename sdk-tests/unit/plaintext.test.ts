@@ -9,7 +9,6 @@ import {
   identLiteral,
   merkleProofToPlaintext,
   merkleProofsToPlaintext,
-  parseFeeTier,
   parsePayroll,
   parsePayrollConfig,
   parseStreamAnchor,
@@ -181,13 +180,6 @@ describe("parsers", () => {
       platformFee: 2000n,
       initialized: true,
     });
-  });
-
-  it("parses FeeTier values", () => {
-    const tier = parseFeeTier(
-      "{ min_amount: 0u64, max_amount: 1000000000u64, fee_bps: 25u64 }",
-    );
-    assert.deepEqual(tier, { minAmount: 0n, maxAmount: 1_000_000_000n, feeBps: 25n });
   });
 
   it("parseStructMembers splits top-level members with nested arrays/structs", () => {

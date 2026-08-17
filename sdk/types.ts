@@ -12,13 +12,6 @@
  * - Integer types (`u8`/`u32`/`u64`/`u128`/`i64`) are `bigint`.
  */
 
-/** Leo `FeeTier` struct. Amounts are USD values with 6 decimals. */
-export interface FeeTier {
-  minAmount: bigint;
-  maxAmount: bigint;
-  feeBps: bigint;
-}
-
 /** Leo `Payroll` struct, as stored in the `payrolls` mapping (public streams only). */
 export interface Payroll {
   streamId: string;

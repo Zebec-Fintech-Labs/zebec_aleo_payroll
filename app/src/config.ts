@@ -37,3 +37,10 @@ export const ALEO_PRICE_USD = 200_000n; // $0.20
 
 /** Default transaction fee in microcredits (0.1 ALEO). */
 export const DEFAULT_FEE = 100_000;
+
+/**
+ * Flat stream fee in basis points used to compute the admin-signed stream fee.
+ * The on-chain program no longer has per-config fee tiers, so a single default
+ * is used (the admin signs the resulting flat fee for every stream).
+ */
+export const DEFAULT_FEE_BPS = 25n;

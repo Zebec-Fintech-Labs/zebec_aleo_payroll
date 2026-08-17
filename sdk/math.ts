@@ -8,7 +8,9 @@ import type { StreamAnchor } from "./types.js";
 
 export const USD_PRICE_DECIMALS_SCALE = 1_000_000n;
 export const BPS_DENOMINATOR = 10_000n;
-export const MAX_FEE_TIERS = 8;
+/** Flat stream fee in basis points used to compute the admin-signed stream fee
+ * (the on-chain program no longer has per-config fee tiers). */
+export const DEFAULT_FEE_BPS = 25n;
 const U64_MAX = (1n << 64n) - 1n;
 
 export interface StreamFee {

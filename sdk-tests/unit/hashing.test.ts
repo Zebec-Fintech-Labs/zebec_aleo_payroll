@@ -3,7 +3,6 @@ import { describe, it } from "mocha";
 
 import {
   configNameToField,
-  feeTierKey,
   tokenPriceMessage,
   whitelistKey,
 } from "../../sdk/hashing.js";
@@ -13,8 +12,6 @@ import {
 // off-chain BHP256 hashing reproduces `BHP256::hash_to_field` exactly.
 const PRICE_HASH =
   "2465286061713934066083951265206464108512855460089046687757762326215251262203field";
-const TIER_KEY =
-  "4280435061793654878309538122108291005136850793721184370576372014297830104823field";
 const WHITELIST_KEY =
   "5949549857295180779432337181339499322185250953286779710073517871832327878616field";
 
@@ -39,12 +36,6 @@ describe("hashing (known on-chain vectors)", () => {
       nonce: 5n,
     });
     assert.equal(message, PRICE_HASH);
-  });
-
-  it("computes the fee_tiers mapping key like on-chain", () => {
-    assert.equal(feeTierKey("12345", 3), TIER_KEY);
-    assert.equal(feeTierKey(12345n, 3), TIER_KEY);
-    assert.equal(feeTierKey("12345field", 3), TIER_KEY);
   });
 
   it("computes the whitelisted_token_programs mapping key like on-chain", () => {
