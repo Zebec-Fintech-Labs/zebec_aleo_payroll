@@ -166,12 +166,6 @@ struct Config {
     platform_fee: u64,
 }
 
-
-
-// Usd price decimal scale. Used to resolve floating point value of price
-// by multiplying price by this scale.
-const USD_PRICE_DECIMALS_SCALE: u64 = 1_000_000u64;
-
 // Maximum u64 value, widened to u128 for range checks on widened arithmetic.
 const U64_MAX: u128 = 18_446_744_073_709_551_615u128;
 
@@ -181,10 +175,23 @@ const I64_MAX: u128 = 9_223_372_036_854_775_807u128;
 // Fallback withdraw frequency (1 day) used as a guarded divisor when
 // auto-withdrawal is disabled (Leo flattens branches, so the division is
 // always evaluated).
-const DEFAULT_WITHDRAW_FREQUENCY: u64 = 86400u64;
+const DEFAULT_WITHDRAW_FREQUENCY: u64 = 60u64 * 60u64 * 24u64; // daily
 
-// Minimum auto-withdrawal frequency, in seconds.
-const MIN_WITHDRAW_FREQUENCY: u64 = 2u64;
+const WITHDRAW_FREQUENCIES_LEN: u8 = 11u8;
+
+const WITHDRAW_FREQUENCIES: [u64; WITHDRAW_FREQUENCIES_LEN] =  [
+        60u64, // per minute
+        60u64 * 2u64, // per 2 minute
+        60u64 * 60u64, // hourly
+        60u64 * 60u64 * 12u64, // per half day
+        60u64 * 60u64 * 24u64, // daily
+        60u64 * 60u64 * 24u64 * 7u64, // weekly
+        60u64 * 60u64 * 24u64 * 14u64, // bi-weekly
+        60u64 * 60u64 * 24u64 * 30u64, // monthy
+        60u64 * 60u64 * 24u64 * 30u64 * 3u64, // quarter yeary
+        60u64 * 60u64 * 24u64 * 30u64 * 6u64, // half yearly
+        60u64 * 60u64 * 24u64 * 365u64, // yearly
+    ];
 
 // Allowed discrepancy between a caller-provided `now` input and the block
 // timestamp, in seconds.
@@ -263,24 +270,16 @@ program test_zebec_payroll_v4.aleo {
         let self_address: address = std::ctx::addr();
 
         assert(params.duration > 0u64);
-        assert(!params.can_topup || (params.initial_buffer_amount > 0u128 && params.initial_buffer_amount <= params.amount));
+        assert(!params.can_topup || (params.can_topup && params.initial_buffer_amount > 0u128 && params.initial_buffer_amount <= params.amount));
         
         let deposit_amount: u128 = params.can_topup ? params.initial_buffer_amount: params.amount;
         assert(deposit_amount > 0u128);
-        let token_input_record_amount: u128 = token_input_record.amount as u128;
-        assert(token_input_record_amount >= deposit_amount);
 
-        let auto_withdrawal_fee: u64 = 0u64;
-        // Leo flattens `if` branches: the division below executes even when
-        // auto-withdrawal is disabled, so the divisor must be guarded.
-        let safe_withdraw_frequency: u64 = params.withdraw_frequency > 0u64 ? params.withdraw_frequency : DEFAULT_WITHDRAW_FREQUENCY;
-        if (params.auto_withdrawable) {
-            assert(params.withdraw_frequency >= MIN_WITHDRAW_FREQUENCY); // minimum is per 2 seconds
-
-            auto_withdrawal_fee = compute_auto_withdrawal_fee(
-                params.duration, safe_withdraw_frequency, config.base_fee, config.platform_fee
-            );
-        }
+        assert(!params.auto_withdrawable || (params.auto_withdrawable && params.withdraw_frequency > 0u64 && is_withdraw_frequency_valid(params.withdraw_frequency)));
+        // The assertion above checks the params.withdraw_frequency is always greater than 0. So, we can safely compute auto withdrawal fee with params.withdraw_frequency;
+        let auto_withdrawal_fee: u64 = params.auto_withdrawable ? compute_auto_withdrawal_fee(
+                params.duration, params.withdraw_frequency, config.base_fee, config.platform_fee
+            ) : 0u64;
 
         assert(credit_input_record.microcredits >= auto_withdrawal_fee + token_fee.stream_fee_amount);
 
@@ -782,22 +781,16 @@ program test_zebec_payroll_v4.aleo {
         let self_address: address = std::ctx::addr();
 
         assert(params.duration > 0u64);
-        assert(!params.can_topup || (params.initial_buffer_amount > 0u128 && params.initial_buffer_amount <= params.amount));
+        assert(!params.can_topup || (params.can_topup && params.initial_buffer_amount > 0u128 && params.initial_buffer_amount <= params.amount));
 
         let deposit_amount: u128 = params.can_topup ? params.initial_buffer_amount: params.amount;
         assert(deposit_amount > 0u128);
 
-        let auto_withdrawal_fee: u64 = 0u64;
-        // Leo flattens `if` branches: the division below executes even when
-        // auto-withdrawal is disabled, so the divisor must be guarded.
-        let safe_withdraw_frequency: u64 = params.withdraw_frequency > 0u64 ? params.withdraw_frequency : DEFAULT_WITHDRAW_FREQUENCY;
-        if (params.auto_withdrawable) {
-            assert(params.withdraw_frequency >= MIN_WITHDRAW_FREQUENCY);
-
-            auto_withdrawal_fee = compute_auto_withdrawal_fee(
-                params.duration, safe_withdraw_frequency, config.base_fee, config.platform_fee
-            );
-        }
+        assert(!params.auto_withdrawable || (params.auto_withdrawable && params.withdraw_frequency > 0u64 && is_withdraw_frequency_valid(params.withdraw_frequency)));
+        // The assertion above checks the params.withdraw_frequency is always greater than 0. So, we can safely compute auto withdrawal fee with params.withdraw_frequency;
+        let auto_withdrawal_fee: u64 = params.auto_withdrawable ? compute_auto_withdrawal_fee(
+                params.duration, params.withdraw_frequency, config.base_fee, config.platform_fee
+            ) : 0u64;
 
         // ALEO fees are paid from the signer's public credits balance.
         let f_stream_fee_transfer: Final =
@@ -1345,3 +1338,15 @@ fn compute_auto_withdrawal_fee(
     let transaction_fee: u64 = (duration / safe_withdraw_frequency) * base_fee;
     return platform_fee + transaction_fee;
 }
+
+fn is_withdraw_frequency_valid(withdraw_frequency: u64) -> bool {
+    let found = false;
+
+    for i in 0u8..WITHDRAW_FREQUENCIES_LEN {
+        if (!found && withdraw_frequency == WITHDRAW_FREQUENCIES[i]) {
+            found = true;
+        }
+    }
+
+    return found;
+} 
