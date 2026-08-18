@@ -14,7 +14,7 @@ if (!PRIVATE_KEY) {
     console.error("PRIVATE_KEY environment variable is not set.");
     process.exit(1);
 }
-const HOST = process.env.ENDPOINT ?? "https://api.explorer.provable.com/v1";
+const HOST = "https://api.explorer.provable.com/v1";
 console.log("Host:", HOST);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PROGRAM_SOURCE = fs.readFileSync(
