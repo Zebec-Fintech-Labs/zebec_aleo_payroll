@@ -244,6 +244,30 @@ Schnorr signature against `BHP256::hash_to_field(token_fee)` inside
 `signStreamTokenFee` / `streamTokenFeeMessage`. **Do not add, remove, or
 reorder fields without updating the SDK and regenerating test vectors.**
 
+### Token payout pattern (caller-based, no allowance)
+
+Payouts (withdraw/cancel, public and private) spend the program's **own**
+public token balance. They must use the **caller-based** IARC22 functions —
+`transfer_public(recipient, amount)` and
+`transfer_public_to_private(recipient, amount)` — which debit `self.caller`
+(this program's address) inside the token program and require **no
+allowance**.
+
+**Never** use `transfer_from_public` / `transfer_from_public_to_private` with
+`owner = self_address` for payouts: the token program computes the allowance
+key as `BHP256(TokenAllowance{ account: owner, spender: self.caller })` and
+hard-`get`s it; a self-allowance is never approved, so finalize aborts with
+"…field not found in mapping allowances" at the token transition.
+
+`transfer_from_public(signer → self_address)` remains correct exactly once:
+the **deposit pull** in `create_stream_public`, where the employer has
+pre-approved the program via `approve_public`.
+
+Private-path payouts must **re-emit** the returned `(ComplianceRecord, Token)`
+records as transition outputs (same pattern as `create_stream_private`
+forwarding `deposit_comp`/`deposit_change`) so the payout reaches the
+receiver/sender and the investigator.
+
 ### `credits.aleo::split` burn
 
 `credits.aleo::split` deducts a fixed 10,000 microcredit fee from the second

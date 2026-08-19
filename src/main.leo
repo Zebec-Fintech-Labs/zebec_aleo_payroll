@@ -389,13 +389,19 @@ program test_zebec_payroll_v5.aleo {
     // returned) — the stream is terminal. The receiver and withdrawer tickets
     // become inert: all lifecycle entry functions assert !stream.canceled so
     // they will reject any future use of those tickets.
+    //
+    // Payouts use the caller-based `transfer_public_to_private`: the program
+    // spends its own public token balance (`self.caller` inside the token
+    // program is this program's address), so no allowance is required. The
+    // returned ComplianceRecord/Token records are re-emitted as outputs so
+    // the refund/payout records actually reach the sender, receiver, and
+    // investigator.
     fn cancel_stream_private(
         ticket_record: SenderPayrollTicket,
         stream_anchor: StreamAnchor,
         now: i64,
-    ) -> Final {
+    ) -> (dyn record, dyn record, dyn record, dyn record, Final) {
         let signer: address = std::ctx::signer();
-        let self_address: address = std::ctx::addr();
 
         // Check: signer is the sender payroll ticket owner.
         assert(signer == ticket_record.owner);
@@ -429,21 +435,21 @@ program test_zebec_payroll_v5.aleo {
 
         let sender_amount: u128 = stream_anchor.deposited_amount - total_withdrawable_amount;
 
-        let (comp_a, token_a, f_sender_amount_transfer) 
-            = IARC22@(ticket_record.token_program)::transfer_from_public_to_private(
-                self_address, ticket_record.owner, sender_amount
+        let (comp_a, token_a, f_sender_amount_transfer)
+            = IARC22@(ticket_record.token_program)::transfer_public_to_private(
+                ticket_record.owner, sender_amount
             );
 
-        let (comp_b, token_b, f_receiver_amount_transfer) 
-            = IARC22@(ticket_record.token_program)::transfer_from_public_to_private(
-                self_address, ticket_record.receiver, currently_withdrawable_amount
+        let (comp_b, token_b, f_receiver_amount_transfer)
+            = IARC22@(ticket_record.token_program)::transfer_public_to_private(
+                ticket_record.receiver, currently_withdrawable_amount
             );
-        
+
         let stream_id = ticket_record.stream_id;
         // The sender ticket (ticket_record) is consumed and not re-emitted —
         // it is burned here, making the cancel terminal for the sender.
-        
-        return final {
+
+        return (comp_a, token_a, comp_b, token_b, final {
             let real_now = std::ctx::block_timestamp();
             // Check: caller-supplied `now` is within 2 minutes (NOW_TOLERANCE) of block time.
             assert_within_tolerance(real_now, now);
@@ -465,7 +471,7 @@ program test_zebec_payroll_v5.aleo {
 
             f_sender_amount_transfer.run();
             f_receiver_amount_transfer.run();
-        };
+        });
     }
 
     // Top up a buffer-mode private stream (debt model). Sender only: owning
@@ -557,13 +563,15 @@ program test_zebec_payroll_v5.aleo {
         });
     }
 
+    // Payout uses the caller-based `transfer_public_to_private` (the program
+    // spends its own public balance; no allowance required) and re-emits the
+    // returned ComplianceRecord/Token records as outputs.
     fn withdraw_stream_private(
         ticket_record: ReceiverPayrollTicket,
         stream_anchor: StreamAnchor,
         now: i64,
-    ) -> (ReceiverPayrollTicket, Final) {
+    ) -> (ReceiverPayrollTicket, dyn record, dyn record, Final) {
         let signer: address = std::ctx::signer();
-        let self_address: address = std::ctx::addr();
 
         // Check: signer is the receiver payroll ticket owner.
         assert(signer == ticket_record.owner);
@@ -599,14 +607,14 @@ program test_zebec_payroll_v5.aleo {
         let capped_withdrawable_amount: u128 = currently_withdrawable_amount <= available_withdraw_amount ? currently_withdrawable_amount : available_withdraw_amount;
 
         let (comp, token, f_receiver_amount_transfer)
-            = IARC22@(ticket_record.token_program)::transfer_from_public_to_private(
-                self_address, ticket_record.owner, capped_withdrawable_amount
+            = IARC22@(ticket_record.token_program)::transfer_public_to_private(
+                ticket_record.owner, capped_withdrawable_amount
             );
-        
+
         let stream_id = ticket_record.stream_id;
         let receiver_ticket = ReceiverPayrollTicket { ..ticket_record };
-        
-        return (receiver_ticket, final {
+
+        return (receiver_ticket, comp, token, final {
             let real_now = std::ctx::block_timestamp();
             // Check: caller-supplied `now` is within 2 minutes (NOW_TOLERANCE) of block time.
             assert_within_tolerance(real_now, now);
@@ -617,7 +625,7 @@ program test_zebec_payroll_v5.aleo {
             let stream = stream_anchors.get(stream_id);
             // Check: on-chain anchor matches the caller-supplied snapshot.
             assert_stream_anchor_eq(stream_anchor, stream);
-        
+
             let withdrawn_amount: u128 = stream.withdrawn_amount + capped_withdrawable_amount;
             let updated_stream = StreamAnchor {
                 ..stream
@@ -629,14 +637,16 @@ program test_zebec_payroll_v5.aleo {
         });
     }
 
+    // Payout uses the caller-based `transfer_public_to_private` (the program
+    // spends its own public balance; no allowance required) and re-emits the
+    // returned ComplianceRecord/Token records as outputs.
     fn withdraw_stream_auto_private(
-        ticket_record: WithdrawerPayrollTicket, 
-        config: Config, 
-        stream_anchor: StreamAnchor, 
+        ticket_record: WithdrawerPayrollTicket,
+        config: Config,
+        stream_anchor: StreamAnchor,
         now: i64
-    ) -> (WithdrawerPayrollTicket, Final) {
+    ) -> (WithdrawerPayrollTicket, dyn record, dyn record, Final) {
         let signer: address = std::ctx::signer();
-        let self_address: address = std::ctx::addr();
 
         // Check: signer is the config withdrawer and owns the withdrawer ticket.
         assert(signer == config.withdrawer);
@@ -677,14 +687,14 @@ program test_zebec_payroll_v5.aleo {
         assert(capped_withdrawable_amount > 0u128);
 
         let (comp, token, f_receiver_amount_transfer)
-            = IARC22@(ticket_record.token_program)::transfer_from_public_to_private(
-                self_address, ticket_record.receiver, capped_withdrawable_amount
+            = IARC22@(ticket_record.token_program)::transfer_public_to_private(
+                ticket_record.receiver, capped_withdrawable_amount
             );
-        
+
         let stream_id = ticket_record.stream_id;
         let withdrawer_ticket = WithdrawerPayrollTicket { ..ticket_record };
-        
-        return (withdrawer_ticket, final {
+
+        return (withdrawer_ticket, comp, token, final {
             let real_now = std::ctx::block_timestamp();
             // Check: caller-supplied `now` is within 2 minutes (NOW_TOLERANCE) of block time.
             assert_within_tolerance(real_now, now);
@@ -784,13 +794,14 @@ program test_zebec_payroll_v5.aleo {
         };
     }
 
+    // Payouts use the caller-based `transfer_public` (the program spends its
+    // own public balance; no allowance required).
     fn cancel_stream_public(
         payroll: Payroll,
         stream_anchor: StreamAnchor,
         now: i64,
     ) -> Final {
         let signer: address = std::ctx::signer();
-        let self_address: address = std::ctx::addr();
 
         // Check: signer is the sender.
         assert(signer == payroll.sender);
@@ -825,14 +836,14 @@ program test_zebec_payroll_v5.aleo {
         let sender_amount: u128 = stream_anchor.deposited_amount - total_withdrawable_amount;
 
         let payroll_token_program = payroll.token_program;
-        let f_sender_amount_transfer: Final 
-            = IARC22@(payroll_token_program)::transfer_from_public(
-                self_address, payroll.sender, sender_amount
+        let f_sender_amount_transfer: Final
+            = IARC22@(payroll_token_program)::transfer_public(
+                payroll.sender, sender_amount
             );
 
-        let f_receiver_amount_transfer: Final 
-            = IARC22@(payroll_token_program)::transfer_from_public(
-                self_address, payroll.receiver, currently_withdrawable_amount
+        let f_receiver_amount_transfer: Final
+            = IARC22@(payroll_token_program)::transfer_public(
+                payroll.receiver, currently_withdrawable_amount
             );
         
         return final {
@@ -862,13 +873,14 @@ program test_zebec_payroll_v5.aleo {
         };
     }
 
+    // Payout uses the caller-based `transfer_public` (the program spends its
+    // own public balance; no allowance required).
     fn withdraw_stream_public(
         payroll: Payroll,
         stream_anchor: StreamAnchor,
         now: i64,
     ) -> Final {
         let signer: address = std::ctx::signer();
-        let self_address: address = std::ctx::addr();
 
         // Check: signer is the receiver.
         assert(signer == payroll.receiver);
@@ -905,8 +917,8 @@ program test_zebec_payroll_v5.aleo {
         let capped_withdrawable_amount: u128 = currently_withdrawable_amount <= available_withdraw_amount ? currently_withdrawable_amount : available_withdraw_amount;
 
         let f_receiver_amount_transfer: Final
-            = IARC22@(payroll.token_program)::transfer_from_public(
-                self_address, payroll.receiver, capped_withdrawable_amount
+            = IARC22@(payroll.token_program)::transfer_public(
+                payroll.receiver, capped_withdrawable_amount
             );
         
         return final {
