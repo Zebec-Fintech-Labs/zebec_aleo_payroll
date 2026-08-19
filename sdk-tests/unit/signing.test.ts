@@ -2,46 +2,54 @@ import assert from "node:assert";
 import { Account } from "@provablehq/sdk";
 import { describe, it } from "mocha";
 
-import { signTokenPrice, verifyTokenPriceSignature } from "../../sdk/signing.js";
-import type { TokenPrice } from "../../sdk/types.js";
+import { signStreamTokenFee, verifyStreamTokenFeeSignature } from "../../sdk/signing.js";
+import type { StreamTokenFee } from "../../sdk/types.js";
 
 // Well-known Leo CLI default private key (public, used for tests only).
 const TEST_PRIVATE_KEY =
   "APrivateKey1zkp8CZNn3yeCseEtxuVPbDCwSyhGW6yZKUYKfgXmcpoGPWH";
 
-const tokenPrice: TokenPrice = {
+const tokenFee: StreamTokenFee = {
   config: 12345n,
   streamToken: "token",
-  streamTokenPriceUsd: 1_000_000n,
-  aleoPriceUsd: 500_000n,
-  priceExpiry: 1_893_456_000n,
+  streamFeeAmount: 50_000n,
+  expiry: 1_893_456_000n,
   nonce: 5n,
 };
 
-describe("signTokenPrice", () => {
+describe("signStreamTokenFee", () => {
   it("produces a sign1... signature that verifies against the signer address", () => {
     const account = new Account({ privateKey: TEST_PRIVATE_KEY });
-    const signature = signTokenPrice(TEST_PRIVATE_KEY, tokenPrice);
+    const signature = signStreamTokenFee(TEST_PRIVATE_KEY, tokenFee);
     assert.ok(signature.startsWith("sign1"));
     assert.ok(
-      verifyTokenPriceSignature(account.address().to_string(), tokenPrice, signature),
+      verifyStreamTokenFeeSignature(account.address().to_string(), tokenFee, signature),
     );
   });
 
-  it("fails verification for a different price", () => {
+  it("fails verification for a different fee object (nonce changed)", () => {
     const account = new Account({ privateKey: TEST_PRIVATE_KEY });
-    const signature = signTokenPrice(TEST_PRIVATE_KEY, tokenPrice);
-    const other = { ...tokenPrice, nonce: 6n };
+    const signature = signStreamTokenFee(TEST_PRIVATE_KEY, tokenFee);
+    const other = { ...tokenFee, nonce: 6n };
     assert.ok(
-      !verifyTokenPriceSignature(account.address().to_string(), other, signature),
+      !verifyStreamTokenFeeSignature(account.address().to_string(), other, signature),
+    );
+  });
+
+  it("fails verification for a different fee amount", () => {
+    const account = new Account({ privateKey: TEST_PRIVATE_KEY });
+    const signature = signStreamTokenFee(TEST_PRIVATE_KEY, tokenFee);
+    const other = { ...tokenFee, streamFeeAmount: 99_999n };
+    assert.ok(
+      !verifyStreamTokenFeeSignature(account.address().to_string(), other, signature),
     );
   });
 
   it("fails verification for a different address", () => {
-    const signature = signTokenPrice(TEST_PRIVATE_KEY, tokenPrice);
+    const signature = signStreamTokenFee(TEST_PRIVATE_KEY, tokenFee);
     const other = new Account();
     assert.ok(
-      !verifyTokenPriceSignature(other.address().to_string(), tokenPrice, signature),
+      !verifyStreamTokenFeeSignature(other.address().to_string(), tokenFee, signature),
     );
   });
 });
