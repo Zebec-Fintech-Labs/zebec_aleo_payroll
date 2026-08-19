@@ -37,8 +37,7 @@ export default function DeployPage({ payroll }: { payroll: UsePayroll }) {
       <h2>Deploy / upgrade program</h2>
       <p className="muted" style={{ fontSize: "0.85rem" }}>
         Deploys <code>build/test_zebec_payroll_v5/test_zebec_payroll_v5.aleo</code> (
-        {programSource.length.toLocaleString()} bytes) through the wallet. The same
-        call upgrades an existing upgradable deployment of the program.
+        {programSource.length.toLocaleString()} bytes) through the wallet.
       </p>
       <form
         className="grid"
