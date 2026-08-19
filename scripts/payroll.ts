@@ -33,11 +33,11 @@ import {
     nowSeconds,
     PayrollClient,
     PROGRAM_ID,
-    signTokenPrice,
+    signStreamTokenFee,
     type Config,
     type CreateStreamParams,
     type MerkleProof,
-    type TokenPrice,
+    type StreamTokenFee,
 } from "../sdk/index.js";
 
 dotenv.config();
@@ -110,8 +110,8 @@ if (sender === receiver) {
 
 const CONFIG_NAME = configNameToField("Payroll_Config_002");
 const TOKEN_PROGRAM = "test_usdcx_stablecoin";
-const TOKEN_PRICE_USD = 1_000_000n; // $1.00, 6 decimals
-const ALEO_PRICE_USD = 200_000n; // $0.20, 6 decimals
+const TOKEN_PRICE_USD = 1_000_000n; // $1.00 per token, 6 decimals (used for off-chain fee quote only)
+const ALEO_PRICE_USD = 200_000n;  // $0.20 per ALEO, 6 decimals (used for off-chain fee quote only)
 
 const STREAM_PARAMS: CreateStreamParams = {
     receiver,
@@ -158,26 +158,25 @@ async function getConfigInput(): Promise<Config> {
 }
 
 /**
- * Resolve the stream fee basis points. The on-chain program no longer has
- * per-config fee tiers, so a single flat `DEFAULT_FEE_BPS` is used for the
- * admin-signed stream fee (the `usdValue` argument is accepted for API
- * compatibility and ignored).
+ * Compute the stream fee in microcredits from off-chain USD prices and the
+ * flat DEFAULT_FEE_BPS tier. The resulting amount is embedded in the signed
+ * `StreamTokenFee` and verified on-chain via Schnorr signature.
  */
-async function resolveFeeBps(_usdValue: bigint): Promise<bigint> {
-    return DEFAULT_FEE_BPS;
+function computeSignedFeeAmount(streamAmount: bigint): bigint {
+    const { streamFee } = computeStreamFee(streamAmount, TOKEN_PRICE_USD, ALEO_PRICE_USD, DEFAULT_FEE_BPS);
+    return streamFee;
 }
 
-/** Build a fresh admin-signed `TokenPrice` attestation. */
-function createSignedTokenPrice(): { tokenPrice: TokenPrice; signature: string } {
-    const tokenPrice: TokenPrice = {
+/** Build a fresh admin-signed `StreamTokenFee` attestation. */
+function createSignedTokenFee(streamAmount: bigint): { tokenFee: StreamTokenFee; signature: string } {
+    const tokenFee: StreamTokenFee = {
         config: CONFIG_NAME,
         streamToken: TOKEN_PROGRAM,
-        streamTokenPriceUsd: TOKEN_PRICE_USD,
-        aleoPriceUsd: ALEO_PRICE_USD,
-        priceExpiry: nowSeconds() + 3600n,
+        streamFeeAmount: computeSignedFeeAmount(streamAmount),
+        expiry: nowSeconds() + 3600n,
         nonce: randomField(),
     };
-    return { tokenPrice, signature: signTokenPrice(ADMIN_PRIVATE_KEY!, tokenPrice) };
+    return { tokenFee, signature: signStreamTokenFee(ADMIN_PRIVATE_KEY!, tokenFee) };
 }
 
 /**
@@ -204,31 +203,16 @@ async function createStreamPrivate(): Promise<string | bigint> {
     const params = STREAM_PARAMS;
     console.log("streamId:", params.streamId);
     const config = await getConfigInput();
-    const { tokenPrice, signature } = createSignedTokenPrice();
-    // usdValue does not depend on feeBps; resolve the tier from it, then fee.
-    const { usdValue } = computeStreamFee(
-        params.amount,
-        tokenPrice.streamTokenPriceUsd,
-        tokenPrice.aleoPriceUsd,
-        0n,
-    );
-    const feeBps = await resolveFeeBps(usdValue);
-    const { streamFee } = computeStreamFee(
-        params.amount,
-        tokenPrice.streamTokenPriceUsd,
-        tokenPrice.aleoPriceUsd,
-        feeBps,
-    );
-    console.log(`Stream USD value: ${usdValue}, fee tier: ${feeBps} bps, stream fee: ${streamFee} microcredits`);
+    const { tokenFee, signature } = createSignedTokenFee(params.amount);
+    console.log(`Stream fee: ${tokenFee.streamFeeAmount} microcredits`);
     const proofs = await getComplianceProofs(sender);
 
     const txId = await senderClient.createStreamPrivate(
         params,
         TOKEN_PROGRAM,
         config,
-        tokenPrice,
+        tokenFee,
         signature,
-        feeBps,
         proofs,
         {
             priorityFee: 0.1,
@@ -248,14 +232,8 @@ async function createStreamPublic(): Promise<string | bigint> {
     const params = STREAM_PARAMS;
     console.log("streamId:", params.streamId);
     const config = await getConfigInput();
-    const { tokenPrice, signature } = createSignedTokenPrice();
-    const { usdValue } = computeStreamFee(
-        params.amount,
-        tokenPrice.streamTokenPriceUsd,
-        tokenPrice.aleoPriceUsd,
-        0n,
-    );
-    const feeBps = await resolveFeeBps(usdValue);
+    const { tokenFee, signature } = createSignedTokenFee(params.amount);
+    console.log(`Public stream fee: ${tokenFee.streamFeeAmount} microcredits`);
     // `create_stream_public` pulls the deposit via `transfer_from_public`,
     // which requires this payroll program to be approved as the spender first.
     // Check the on-chain allowance and approve if it is too low.
@@ -285,9 +263,8 @@ async function createStreamPublic(): Promise<string | bigint> {
         params,
         TOKEN_PROGRAM,
         config,
-        tokenPrice,
+        tokenFee,
         signature,
-        feeBps,
         { priorityFee: 0.1 },
     );
     console.log("Create public stream transaction ID:", txId);

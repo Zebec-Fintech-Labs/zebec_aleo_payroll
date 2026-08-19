@@ -1,29 +1,29 @@
 /**
- * Admin-side signing of `TokenPrice` messages.
+ * Admin-side signing of `StreamTokenFee` messages.
  *
- * On-chain, `create_stream_private` verifies
- * `std::sig::verify_schnorr(price_signature, config.admin, price_message)`
- * where `price_message = BHP256::hash_to_field(token_price)`. Off-chain we
- * reproduce the message field via {@link tokenPriceMessage} and sign it as an
- * Aleo value with the admin's private key.
+ * On-chain, `create_stream_private` and `create_stream_public` verify
+ * `std::sig::verify_schnorr(fee_signature, config.admin, fee_message)`
+ * where `fee_message = BHP256::hash_to_field(token_fee)`. Off-chain we
+ * reproduce the message field via {@link streamTokenFeeMessage} and sign it
+ * as an Aleo value with the admin's private key.
  */
 
 import { Address, PrivateKey, Signature } from "@provablehq/sdk";
-import { tokenPriceMessage } from "./hashing.js";
-import type { TokenPrice } from "./types.js";
+import { streamTokenFeeMessage } from "./hashing.js";
+import type { StreamTokenFee } from "./types.js";
 
 /**
- * Sign a `TokenPrice` with the config admin's private key. Returns the
- * signature literal (`sign1...`) to pass as the `price_signature` input of
- * `create_stream_private`.
+ * Sign a `StreamTokenFee` with the config admin's private key. Returns the
+ * signature literal (`sign1...`) to pass as the `fee_signature` input of
+ * `create_stream_private` or `create_stream_public`.
  */
-export function signTokenPrice(
+export function signStreamTokenFee(
   privateKey: string | PrivateKey,
-  tokenPrice: TokenPrice,
+  tokenFee: StreamTokenFee,
 ): string {
   const key =
     typeof privateKey === "string" ? PrivateKey.from_string(privateKey) : privateKey;
-  const message = tokenPriceMessage(tokenPrice);
+  const message = streamTokenFeeMessage(tokenFee);
   const signature: Signature = key.signValue(message);
   try {
     return signature.toString();
@@ -33,15 +33,15 @@ export function signTokenPrice(
 }
 
 /**
- * Verify a `TokenPrice` signature against an admin address. Useful for
- * sanity-checking signatures produced elsewhere.
+ * Verify a `StreamTokenFee` signature against an admin address. Useful for
+ * sanity-checking signatures produced off-chain.
  */
-export function verifyTokenPriceSignature(
+export function verifyStreamTokenFeeSignature(
   address: string,
-  tokenPrice: TokenPrice,
+  tokenFee: StreamTokenFee,
   signature: string,
 ): boolean {
-  const message = tokenPriceMessage(tokenPrice);
+  const message = streamTokenFeeMessage(tokenFee);
   const sig = Signature.from_string(signature);
   try {
     return sig.verifyValue(Address.from_string(address), message);
@@ -49,3 +49,9 @@ export function verifyTokenPriceSignature(
     sig.free();
   }
 }
+
+/** @deprecated Use {@link signStreamTokenFee} instead. */
+export const signTokenPrice = signStreamTokenFee;
+
+/** @deprecated Use {@link verifyStreamTokenFeeSignature} instead. */
+export const verifyTokenPriceSignature = verifyStreamTokenFeeSignature;

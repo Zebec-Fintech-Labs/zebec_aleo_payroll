@@ -12,7 +12,7 @@ import {
 } from "@provablehq/sdk/testnet.js";
 
 import { tokenAllowanceKey, whitelistKey } from "./hashing.js";
-import { computeStreamFee, computeTopupAmount, computeWithdrawableAmount, nowSeconds } from "./math.js";
+import { computeTopupAmount, computeWithdrawableAmount, nowSeconds } from "./math.js";
 import {
   configToPlaintext,
   createStreamParamsToPlaintext,
@@ -26,7 +26,7 @@ import {
   parseStreamAnchor,
   payrollToPlaintext,
   streamAnchorToPlaintext,
-  tokenPriceToPlaintext,
+  streamTokenFeeToPlaintext,
 } from "./plaintext.js";
 import { findCreditsRecord, findTicketRecord, findTokenRecord } from "./records.js";
 import type {
@@ -38,7 +38,7 @@ import type {
   PayrollClientOptions as PayrollServiceOptions,
   PayrollConfig,
   StreamAnchor,
-  TokenPrice,
+  StreamTokenFee,
 } from "./types.js";
 import type { WithdrawableAmounts } from "./math.js";
 import type { TicketRecordName } from "./records.js";
@@ -98,17 +98,18 @@ export class PayrollService {
    * Execute `create_stream_private`.
    *
    * `tokenProgram` is the bare identifier of the IARC22 token program (e.g.
-   * `"my_token"` — without the `.aleo` suffix), passed as the second on-chain
-   * input. `creditRecord` / `tokenRecord` are located automatically when
-   * omitted (requires the client to be constructed with `privateKey`).
+   * `"my_token"` — without the `.aleo` suffix). `creditRecord` / `tokenRecord`
+   * are located automatically when omitted (requires a `privateKey`).
+   *
+   * The credit record must cover: auto-withdrawal fee + stream fee +
+   * 10,000 microcredits (the `credits.aleo::split` protocol burn).
    */
   async createStreamPrivate(
     params: CreateStreamParams,
     tokenProgram: string,
     config: Config,
-    tokenPrice: TokenPrice,
-    priceSignature: string,
-    feeBps: bigint,
+    tokenFee: StreamTokenFee,
+    feeSignature: string,
     merkleProofs: [MerkleProof, MerkleProof],
     options: ExecuteOptions & {
       creditRecord?: string | RecordPlaintext;
@@ -116,38 +117,33 @@ export class PayrollService {
     } = {},
   ): Promise<string> {
     const depositAmount = params.canTopup ? params.initialBufferAmount : params.amount;
-    // The credit record must cover the auto-withdrawal fee plus the stream
-    // fee (see the splits in `create_stream_private`).
-    const { streamFee } = computeStreamFee(
-      params.amount,
-      tokenPrice.streamTokenPriceUsd,
-      tokenPrice.aleoPriceUsd,
-      feeBps,
-    );
+    const streamFee = tokenFee.streamFeeAmount;
     let autoWithdrawalFee = 0n;
     if (params.autoWithdrawable) {
       autoWithdrawalFee =
         config.platformFee + (params.duration / params.withdrawFrequency) * config.baseFee;
     }
+    // Include the 10,000 microcredit split burn in the minimum required.
+    const SPLIT_FEE = 10_000n;
     const creditRecord =
       options.creditRecord !== undefined
         ? options.creditRecord.toString()
-        : await this.findCredits(autoWithdrawalFee + streamFee);
-    console.debug(`Found credit record ${creditRecord} covering auto-withdrawal fee ${autoWithdrawalFee} and stream fee ${streamFee}`,
+        : await this.findCredits(autoWithdrawalFee + streamFee + SPLIT_FEE);
+    console.debug(
+      `Found credit record covering auto-withdrawal fee ${autoWithdrawalFee}, stream fee ${streamFee}, split burn ${SPLIT_FEE}`,
     );
     const tokenRecord =
       options.tokenRecord !== undefined
         ? options.tokenRecord.toString()
         : await this.findToken(`${tokenProgram}.aleo`, depositAmount);
-    console.debug(`Found token record ${tokenRecord} covering deposit amount ${depositAmount}`,);
+    console.debug(`Found token record covering deposit amount ${depositAmount}`);
     const tokenProgramId = `${tokenProgram}.aleo`;
     const inputs = [
       createStreamParamsToPlaintext(params),
       identLiteral(tokenProgram),
       configToPlaintext(config),
-      tokenPriceToPlaintext(tokenPrice),
-      priceSignature,
-      `${feeBps}u64`,
+      streamTokenFeeToPlaintext(tokenFee),
+      feeSignature,
       creditRecord,
       tokenRecord,
       merkleProofsToPlaintext(merkleProofs),
@@ -285,9 +281,8 @@ export class PayrollService {
     params: CreateStreamParams,
     tokenProgram: string,
     config: Config,
-    tokenPrice: TokenPrice,
-    priceSignature: string,
-    feeBps: bigint,
+    tokenFee: StreamTokenFee,
+    feeSignature: string,
     options: ExecuteOptions = {},
   ): Promise<string> {
     const tokenProgramId = `${tokenProgram}.aleo`;
@@ -295,9 +290,8 @@ export class PayrollService {
       createStreamParamsToPlaintext(params),
       identLiteral(tokenProgram),
       configToPlaintext(config),
-      tokenPriceToPlaintext(tokenPrice),
-      priceSignature,
-      `${feeBps}u64`,
+      streamTokenFeeToPlaintext(tokenFee),
+      feeSignature,
     ];
     const extraImports = {
       [tokenProgramId]: await this.loadProgramSource(tokenProgramId),
