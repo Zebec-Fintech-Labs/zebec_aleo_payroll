@@ -488,7 +488,7 @@ program test_zebec_payroll_v5.aleo {
         now: i64,
         token_input_record: dyn record,
         sender_merkle_proofs: [MerkleProof; 2]
-    ) -> (SenderPayrollTicket, Final) {
+    ) -> (SenderPayrollTicket, dyn record, dyn record, Final) {
         let signer: address = std::ctx::signer();
         let self_address: address = std::ctx::addr();
 
@@ -527,7 +527,9 @@ program test_zebec_payroll_v5.aleo {
         assert(token_input_record_amount >= topup_amount);
 
         // Pull the top-up into the program's public balance (same pattern as
-        // the create_stream_private deposit).
+        // the create_stream_private deposit). The sender's token change record
+        // and the compliance record are re-emitted as outputs — discarding
+        // them would destroy the change value.
         let (comp, change, f_topup_transfer): (dyn record, dyn record, Final) =
             IARC22@(ticket_record.token_program)::transfer_private_to_public(
                 self_address, topup_amount, token_input_record, sender_merkle_proofs
@@ -537,7 +539,7 @@ program test_zebec_payroll_v5.aleo {
         let updated_ticket = SenderPayrollTicket { ..ticket_record };
         updated_ticket.topup_count = ticket_record.topup_count + 1u64;
 
-        return (updated_ticket, final {
+        return (updated_ticket, comp, change, final {
             let real_now = std::ctx::block_timestamp();
             // Check: caller-supplied `now` is within 2 minutes (NOW_TOLERANCE) of block time.
             assert_within_tolerance(real_now, now);

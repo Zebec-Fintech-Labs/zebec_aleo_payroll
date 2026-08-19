@@ -266,7 +266,12 @@ pre-approved the program via `approve_public`.
 Private-path payouts must **re-emit** the returned `(ComplianceRecord, Token)`
 records as transition outputs (same pattern as `create_stream_private`
 forwarding `deposit_comp`/`deposit_change`) so the payout reaches the
-receiver/sender and the investigator.
+receiver/sender and the investigator. The same rule applies to
+`topup_stream_private`, which re-emits the sender's token **change** record
+and the compliance record — dropping the change would destroy sender value
+whenever the input record exceeds the top-up amount. The only intentional
+drop in the program is `auto_change` in `create_stream_private`, a provably
+0-value credits remainder.
 
 ### `credits.aleo::split` burn
 
