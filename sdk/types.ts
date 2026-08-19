@@ -85,21 +85,25 @@ export interface Config {
   platformFee: bigint;
 }
 
-/** Leo `TokenPrice` struct. Prices are USD with 6 decimals. */
-export interface TokenPrice {
+/** Leo `StreamTokenFee` struct — admin-signed fee for a single create transaction. */
+export interface StreamTokenFee {
   /**
-   * Config name (`field`) this price is signed for. Binds the admin's
+   * Config name (`field`) this fee is signed for. Binds the admin's
    * signature to one payroll config so it cannot be replayed elsewhere.
    */
   config: string | bigint;
   /** Identifier of the stream token program. */
   streamToken: string;
-  streamTokenPriceUsd: bigint;
-  aleoPriceUsd: bigint;
-  priceExpiry: bigint;
+  /** Admin-signed stream fee amount in microcredits. */
+  streamFeeAmount: bigint;
+  /** Unix timestamp after which this signed fee expires. */
+  expiry: bigint;
   /** Unique nonce (a `field`), used for replay protection. */
   nonce: string | bigint;
 }
+
+/** @deprecated Use {@link StreamTokenFee} instead. */
+export type TokenPrice = StreamTokenFee;
 
 /** `iarc22::MerkleProof` struct (16 siblings). */
 export interface MerkleProof {

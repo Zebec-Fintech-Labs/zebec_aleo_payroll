@@ -143,7 +143,7 @@ withdrawable = accrued - withdrawn
 ```
 
 - Pause records a pause timestamp; resume banks the paused duration and extends the end time so the employee still receives the full amount.
-- Cancel is terminal: vested → employee, unvested → employer, stream marked cancelled, ticket invalidated.
+- Cancel is terminal: vested → employee, unvested → employer, stream marked cancelled, **sender ticket burned** (not re-emitted by `cancel_stream_private`; receiver and withdrawer tickets become inert via the `!canceled` checks in all lifecycle entry functions).
 - Access control via `self.caller` / `self.signer`; `signature::verify(sig, addr, msg)` or `ECDSA::verify_keccak256` for meta-transactions.
 - Records are UTXO-like: every spend must return change outputs or value is destroyed.
 - Buffer mode: `initialBufferDuration` sets the proportional initial deposit; `coveredUntil` tracks the funded horizon; withdrawals beyond the funded buffer fail until a top-up.
@@ -188,4 +188,77 @@ Costs: storage (tx bytes), finalize (mapping ops), proof synthesis (per tx). Min
   (0 = sender, 1 = receiver, 2 = withdrawer; ported `matchesTicket` logic).
 - The only private key in the app is the admin attestation key input on the
   Employer page, used solely for `signTokenPrice` (never persisted).
+- **Current status (app drift):** `app/src/payroll/WalletPayrollService.ts` and
+  its config module still use the old `TokenPrice` struct (6 fields with USD
+  prices) and pass a `feeBps` 9th input. The on-chain program now uses
+  `StreamTokenFee` (5 fields: `config`, `stream_token`, `stream_fee_amount`,
+  `expiry`, `nonce`) and the create entries take 8 / 5 inputs respectively. The
+  app cannot execute `create_stream_*` until re-synced. The SDK (`sdk/`) and CLI
+  scripts (`scripts/`) have been updated; the app update is a deferred task.
 <!-- END: Browser app -->
+
+<!-- BEGIN: Program architecture notes -->
+## 7. Program architecture notes (current as of Leo 4.4.1 refactor)
+
+### Shared finalize logic (`final fn finalize_create_stream`)
+
+`create_stream_public` and `create_stream_private` share their on-chain
+verification and state-write logic via a top-level `final fn
+finalize_create_stream(params, config, token_fee, fee_signature, token_program,
+deposit_amount, signer, is_public)`. This helper:
+
+1. Re-validates all stream parameters at the block level.
+2. Fetches and verifies the `payroll_configs` entry (`assert_config_fields`).
+3. Checks and consumes the `token_fee_nonces` entry (replay prevention).
+4. Verifies `assert_token_fee_binding` and the Schnorr signature.
+5. Checks the token whitelist and stream-id freshness.
+6. Constructs and writes the `StreamAnchor` (with `is_public` from the flag).
+7. When `is_public == true`: also checks `payrolls` freshness and writes the
+   `Payroll` mapping entry.
+
+Each entry's `final {}` block calls the helper first, then runs its own
+`.run()` calls (CEI order: checks/effects in helper, interactions after).
+
+**New entry functions must follow this pattern.** When adding a `create_*`
+variant (e.g. a native-credits path in a future phase), call
+`finalize_create_stream` from its `final {}` block rather than duplicating the
+verification logic inline.
+
+### `assert_create_params` helper
+
+Both create transitions call the top-level `fn assert_create_params(params)`
+before any sub-calls. This helper enforces:
+- `duration > 0` and `amount > 0` in the proof context (early exit before
+  proving expensive sub-calls).
+- `duration as u128 <= I64_MAX` — bounds `buffer_secs ≤ duration`, preventing
+  i64 overflow in `covered_until = start_time + buffer_secs`.
+- Buffer and auto-withdraw frequency validity.
+
+### Signed fee struct: `StreamTokenFee`
+
+The admin signs a `StreamTokenFee { config, stream_token, stream_fee_amount:
+u64, expiry: i64, nonce: field }` struct. The on-chain program verifies the
+Schnorr signature against `BHP256::hash_to_field(token_fee)` inside
+`finalize_create_stream`. The SDK mirrors this via `streamTokenFeeToPlaintext`
+(member order must match the Leo struct declaration exactly) and
+`signStreamTokenFee` / `streamTokenFeeMessage`. **Do not add, remove, or
+reorder fields without updating the SDK and regenerating test vectors.**
+
+### `credits.aleo::split` burn
+
+`credits.aleo::split` deducts a fixed 10,000 microcredit fee from the second
+output record. `create_stream_private` includes this in its coverage assertion
+via the `SPLIT_FEE` constant. When computing the minimum required credit-record
+balance off-chain, always add `SPLIT_FEE = 10_000n` to
+`autoWithdrawalFee + streamFeeAmount`.
+
+### Div-by-zero guard (`DEFAULT_WITHDRAW_FREQUENCY`)
+
+Leo ternaries are flattened — both branches always execute. When
+`auto_withdrawable == false`, the caller may pass `withdraw_frequency = 0`.
+Both `create_stream_private` and `create_stream_public` guard against division
+by zero in `compute_auto_withdrawal_fee` by replacing a zero frequency with
+`DEFAULT_WITHDRAW_FREQUENCY` before the call. The guarded value is only used
+to compute a fee that will be multiplied by 0 (since `auto_withdrawable` is
+false), so the result is always 0 in that case.
+<!-- END: Program architecture notes -->

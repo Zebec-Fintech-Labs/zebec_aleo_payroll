@@ -17,7 +17,7 @@ import type {
   Payroll,
   PayrollConfig,
   StreamAnchor,
-  TokenPrice,
+  StreamTokenFee,
 } from "./types.js";
 
 /** Normalize a field value to its canonical literal form (`"123field"`). */
@@ -85,16 +85,29 @@ export function configToPlaintext(c: Config): string {
   );
 }
 
-/** Serialize a `TokenPrice` struct to its Leo plaintext literal. */
-export function tokenPriceToPlaintext(tp: TokenPrice): string {
+/**
+ * Serialize a `StreamTokenFee` struct to its Leo plaintext literal.
+ *
+ * Member order matches the Leo struct declaration exactly — BHP256 hashes
+ * member bits in declaration order, so the order here determines the signed
+ * message that `create_stream_private` and `create_stream_public` verify
+ * on-chain.
+ *
+ * Leo struct declaration order:
+ *   config: field, stream_token: identifier,
+ *   stream_fee_amount: u64, expiry: i64, nonce: field
+ */
+export function streamTokenFeeToPlaintext(tf: StreamTokenFee): string {
   return validated(
-    `{ config: ${fieldLiteral(tp.config)}, ` +
-    `stream_token: ${identLiteral(tp.streamToken)}, ` +
-    `stream_token_price_usd: ${tp.streamTokenPriceUsd}u64, ` +
-    `aleo_price_usd: ${tp.aleoPriceUsd}u64, ` +
-    `price_expiry: ${tp.priceExpiry}i64, nonce: ${fieldLiteral(tp.nonce)} }`
+    `{ config: ${fieldLiteral(tf.config)}, ` +
+    `stream_token: ${identLiteral(tf.streamToken)}, ` +
+    `stream_fee_amount: ${tf.streamFeeAmount}u64, ` +
+    `expiry: ${tf.expiry}i64, nonce: ${fieldLiteral(tf.nonce)} }`
   );
 }
+
+/** @deprecated Use {@link streamTokenFeeToPlaintext} instead. */
+export const tokenPriceToPlaintext = streamTokenFeeToPlaintext;
 
 /** Serialize a `StreamAnchor` struct to its Leo plaintext literal. */
 export function streamAnchorToPlaintext(a: StreamAnchor): string {

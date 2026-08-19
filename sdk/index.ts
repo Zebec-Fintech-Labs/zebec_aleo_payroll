@@ -13,7 +13,8 @@ export type { Arc22ServiceOptions } from "./client.js";
 export {
   createStreamParamsToPlaintext,
   configToPlaintext,
-  tokenPriceToPlaintext,
+  streamTokenFeeToPlaintext,
+  tokenPriceToPlaintext, // @deprecated
   streamAnchorToPlaintext,
   merkleProofToPlaintext,
   merkleProofsToPlaintext,
@@ -35,7 +36,8 @@ export {
   configNameToField,
   whitelistKey,
   tokenAllowanceKey,
-  tokenPriceMessage,
+  streamTokenFeeMessage,
+  tokenPriceMessage, // @deprecated
 } from "./hashing.js";
 
 export {
@@ -49,7 +51,12 @@ export {
 } from "./math.js";
 export type { StreamFee, TopupAmount, WithdrawableAmounts } from "./math.js";
 
-export { signTokenPrice, verifyTokenPriceSignature } from "./signing.js";
+export {
+  signStreamTokenFee,
+  verifyStreamTokenFeeSignature,
+  signTokenPrice,           // @deprecated
+  verifyTokenPriceSignature, // @deprecated
+} from "./signing.js";
 
 export {
   findCreditsRecord,
@@ -67,5 +74,6 @@ export type {
   PayrollClientOptions,
   PayrollConfig,
   StreamAnchor,
-  TokenPrice,
+  StreamTokenFee,
+  TokenPrice, // @deprecated alias for StreamTokenFee
 } from "./types.js";
