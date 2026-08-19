@@ -15,7 +15,7 @@ import {
   parseStructMembers,
   payrollToPlaintext,
   streamAnchorToPlaintext,
-  tokenPriceToPlaintext,
+  streamTokenFeeToPlaintext,
 } from "../../sdk/plaintext.js";
 import type { Payroll, StreamAnchor } from "../../sdk/types.js";
 
@@ -71,7 +71,7 @@ describe("struct serializers", () => {
     Plaintext.fromString(text).free();
   });
 
-  it("serializes Config, TokenPrice, StreamAnchor and MerkleProofs as parseable Plaintext", () => {
+  it("serializes Config, StreamTokenFee, StreamAnchor and MerkleProofs as parseable Plaintext", () => {
     const config = configToPlaintext({
       configName: "7",
       admin: ADMIN,
@@ -82,15 +82,20 @@ describe("struct serializers", () => {
     });
     Plaintext.fromString(config).free();
 
-    const price = tokenPriceToPlaintext({
+    // StreamTokenFee: fields in Leo struct declaration order.
+    const fee = streamTokenFeeToPlaintext({
       config: 12345n,
       streamToken: "token",
-      streamTokenPriceUsd: 1_000_000n,
-      aleoPriceUsd: 500_000n,
-      priceExpiry: 1_893_456_000n,
+      streamFeeAmount: 50_000n,
+      expiry: 1_893_456_000n,
       nonce: 5n,
     });
-    Plaintext.fromString(price).free();
+    assert.equal(
+      fee,
+      "{ config: 12345field, stream_token: 'token', stream_fee_amount: 50000u64, " +
+      "expiry: 1893456000i64, nonce: 5field }",
+    );
+    Plaintext.fromString(fee).free();
 
     const anchor = streamAnchorToPlaintext(sampleAnchor());
     Plaintext.fromString(anchor).free();
