@@ -1,6 +1,6 @@
 # zebec-payroll-app
 
-Browser app for the `test_zebec_payroll_v5.aleo` payroll program (testnet). It is the
+Browser app for the `test_zebec_payroll_v6.aleo` payroll program (testnet). It is the
 wallet-based counterpart of the Node CLI flows in `../scripts/`: instead of a
 `PRIVATE_KEY` env var and `ProgramManager`, all transactions are executed by
 the [Shield wallet](https://shield.so/) browser extension via the
@@ -72,7 +72,7 @@ tree with `SealanceMerkleTree` from `@provablehq/sdk/testnet.js`, and passes
 - `vite.config.ts` sets `build.target: "esnext"` (the SDK's wasm init uses
   top-level await), COOP/COEP headers for the dev server, and
   `server.fs.allow: [".."]` for the `../sdk` imports and the
-  `build/test_zebec_payroll_v5/test_zebec_payroll_v5.aleo?raw` deploy artifact.
+  `build/test_zebec_payroll_v6/test_zebec_payroll_v6.aleo?raw` deploy artifact.
 - `optimizeDeps.include: ["core-js/proposals/json-parse-with-source.js"]` is
   required because the excluded SDK browser bundle imports that CommonJS
   module; without pre-bundling the browser throws `require is not defined`.

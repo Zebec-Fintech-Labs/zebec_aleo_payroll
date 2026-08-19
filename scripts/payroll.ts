@@ -1,6 +1,6 @@
 /**
  * Payroll stream lifecycle script: create -> pause -> resume -> withdraw ->
- * cancel, against the `test_zebec_payroll_v5.aleo` program on testnet.
+ * cancel, against the `test_zebec_payroll_v6.aleo` program on testnet.
  *
  * Prerequisites:
  * - Config `Payroll_Config_001` initialized (run `npm run admin` first) and
@@ -71,7 +71,7 @@ const FREEZE_LIST_URL =
 const here = path.dirname(fileURLToPath(import.meta.url));
 // console.log("Current directory:", here);
 const PROGRAM_SOURCE = fs.readFileSync(
-    path.resolve(here, "../build/test_zebec_payroll_v5/test_zebec_payroll_v5.aleo"),
+    path.resolve(here, "../build/test_zebec_payroll_v6/test_zebec_payroll_v6.aleo"),
     "utf8",
 );
 

@@ -5,7 +5,7 @@ Date: 2026-08-13
 ## Context
 
 `src/main.leo` already implements public-stream operations on
-`test_zebec_payroll_v5.aleo`: `create_stream_public`,
+`test_zebec_payroll_v6.aleo`: `create_stream_public`,
 `pause_resume_stream_public`, `cancel_stream_public`,
 `withdraw_stream_public`, plus `view fn get_payroll` /
 `view fn get_stream_anchor`. The web app (`app/`) and the shared SDK layer
