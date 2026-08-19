@@ -4,7 +4,6 @@ import path from "node:path";
 import * as fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { configNameToField, PayrollClient } from "../sdk/index.js";
-import { randomBytes } from "node:crypto";
 import { setTimeout } from "node:timers/promises";
 
 dotenv.config();
@@ -22,7 +21,7 @@ const HOST = "https://api.explorer.provable.com/v1";
 const here = path.dirname(fileURLToPath(import.meta.url));
 console.log("Current directory:", here);
 const PROGRAM_SOURCE = fs.readFileSync(
-    path.resolve(here, "../build/test_zebec_payroll_v4/test_zebec_payroll_v4.aleo"),
+    path.resolve(here, "../build/test_zebec_payroll_v5/test_zebec_payroll_v5.aleo"),
     "utf8",
 );
 
@@ -54,6 +53,7 @@ async function initializePayrollConfig() {
     });
     console.log("Config Initialization transaction ID:", txId);
     await waitForConfirmation(txId);
+    await setTimeout(10000);
     const config = await client.getPayrollConfig(CONFIG_NAME);
     console.log("Initialized config:", config);
 }
@@ -83,14 +83,14 @@ async function whitelistTokens() {
         });
         console.log(`Whitelist token ${token} transaction ID:`, txId);
         await waitForConfirmation(txId);
-        await setTimeout(2000);
+        await setTimeout(10000);
         const isWhitelisted = await client.isTokenWhitelisted(CONFIG_NAME, token);
         console.log(`Is token ${token} whitelisted?`, isWhitelisted);
     }
 }
 
 async function main() {
-    // await initializePayrollConfig();
+    await initializePayrollConfig();
     // await updatePayrollConfig();
     await whitelistTokens();
 }

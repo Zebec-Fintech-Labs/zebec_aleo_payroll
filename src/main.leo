@@ -202,7 +202,7 @@ const WITHDRAW_FREQUENCIES: [u64; WITHDRAW_FREQUENCIES_LEN] = [
 // timestamp, in seconds.
 const NOW_TOLERANCE: i64 = 2i64 * 60i64; // 2 minutes
 
-program test_zebec_payroll_v4.aleo {
+program test_zebec_payroll_v5.aleo {
     // Payroll configurations, keyed by unique config name (a BHP256 hash of
     // the off-chain name).
     mapping payroll_configs: field => PayrollConfig;
@@ -1312,7 +1312,11 @@ fn compute_auto_withdrawal_fee(
     base_fee: u64,
     platform_fee: u64,
 ) -> u64 {
-    let transaction_fee: u64 = (duration / safe_withdraw_frequency) * base_fee;
+    assert(is_withdraw_frequency_valid(safe_withdraw_frequency));
+    // duration is multiplied by base fee first and divied by withdraw frequency later
+    // so that decimal value does get accounted which would have be ommitted if duration
+    // was divided by withdraw frequency first
+    let transaction_fee: u64 = (duration * base_fee) / safe_withdraw_frequency;
     return platform_fee + transaction_fee;
 }
 

@@ -173,19 +173,11 @@ export class WalletPayrollService {
       nonce: randomField(),
     };
     const priceSignature = signTokenPrice(adminKey, tokenPrice);
-    // usdValue does not depend on feeBps; resolve the tier from it, then fee.
-    const { usdValue } = computeStreamFee(
-      params.amount,
-      TOKEN_PRICE_USD,
-      ALEO_PRICE_USD,
-      0n,
-    );
-    const feeBps = await this.resolveFeeBps(usdValue);
     const { streamFee } = computeStreamFee(
       params.amount,
       TOKEN_PRICE_USD,
       ALEO_PRICE_USD,
-      feeBps,
+      DEFAULT_FEE_BPS,
     );
     // The credit record must cover the auto-withdrawal fee plus the stream
     // fee (see the splits in `create_stream_private`).
@@ -207,7 +199,6 @@ export class WalletPayrollService {
       configToPlaintext(config),
       tokenPriceToPlaintext(tokenPrice),
       priceSignature,
-      `${feeBps}u64`,
       creditRecord,
       tokenRecord,
       merkleProofs,
@@ -322,20 +313,12 @@ export class WalletPayrollService {
       nonce: randomField(),
     };
     const priceSignature = signTokenPrice(adminKey, tokenPrice);
-    const { usdValue } = computeStreamFee(
-      params.amount,
-      TOKEN_PRICE_USD,
-      ALEO_PRICE_USD,
-      0n,
-    );
-    const feeBps = await this.resolveFeeBps(usdValue);
     const inputs = [
       createStreamParamsToPlaintext(params),
       identLiteral(TOKEN_PROGRAM),
       configToPlaintext(config),
       tokenPriceToPlaintext(tokenPrice),
       priceSignature,
-      `${feeBps}u64`,
     ];
     return this.execute("create_stream_public", inputs, fee, DYNAMIC_DISPATCH_IMPORTS);
   }
@@ -689,16 +672,6 @@ export class WalletPayrollService {
       baseFee: chainConfig.baseFee,
       platformFee: chainConfig.platformFee,
     };
-  }
-
-  /**
-   * Resolve the stream fee basis points. The on-chain program no longer has
-   * per-config fee tiers, so a single flat `DEFAULT_FEE_BPS` is used for the
-   * admin-signed stream fee (the `usdValue` argument is accepted for API
-   * compatibility and ignored).
-   */
-  private async resolveFeeBps(_usdValue: bigint): Promise<bigint> {
-    return DEFAULT_FEE_BPS;
   }
 
   /**
