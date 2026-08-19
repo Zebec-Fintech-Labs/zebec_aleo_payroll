@@ -493,7 +493,7 @@ export default function EmployerPage({ payroll }: { payroll: UsePayroll }) {
             />
           </label>
           <label className="field full">
-            Admin attestation key (signs the TokenPrice; never stored)
+            Admin attestation key (signs the stream fee; never stored)
             <input
               type="password"
               value={adminKey}
@@ -670,7 +670,7 @@ export default function EmployerPage({ payroll }: { payroll: UsePayroll }) {
                 />
               </label>
               <label className="field full">
-                Admin attestation key (signs the TokenPrice; never stored)
+                Admin attestation key (signs the stream fee; never stored)
                 <input
                   type="password"
                   value={adminKey}

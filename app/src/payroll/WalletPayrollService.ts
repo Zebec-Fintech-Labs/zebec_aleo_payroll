@@ -30,16 +30,16 @@ import {
   parseStreamAnchor,
   payrollToPlaintext,
   streamAnchorToPlaintext,
-  tokenPriceToPlaintext,
+  streamTokenFeeToPlaintext,
 } from "../../../sdk/plaintext.ts";
-import { signTokenPrice } from "../../../sdk/signing.ts";
+import { signStreamTokenFee } from "../../../sdk/signing.ts";
 import type {
   Config,
   CreateStreamParams,
   Payroll,
   PayrollConfig,
   StreamAnchor,
-  TokenPrice,
+  StreamTokenFee,
 } from "../../../sdk/types.ts";
 
 import {
@@ -150,64 +150,61 @@ export class WalletPayrollService {
 
   /**
    * Execute `create_stream_private` through the wallet. Full flow ported from
-   * scripts/payroll.ts:createStream — on-chain config read, fee tier
-   * resolution, admin-signed TokenPrice, Sealance compliance proofs, and
-   * credit/token record selection from the wallet.
+   * scripts/payroll.ts:createStream — on-chain config read, admin-signed
+   * stream fee, Sealance compliance proofs, and credit/token record selection
+   * from the wallet.
    *
    * `adminKey` is the config admin's private key, used only to sign the
-   * TokenPrice attestation (never stored).
+   * stream fee attestation (never stored).
    */
   async createStreamPrivate(
     params: CreateStreamParams,
     adminKey: string,
     fee: number = DEFAULT_FEE,
   ): Promise<string> {
+    const SPLIT_FEE = 10_000n;
     const depositAmount = params.canTopup ? params.initialBufferAmount : params.amount;
     const config = await this.getConfigInput();
-    const tokenPrice: TokenPrice = {
-      config: CONFIG_NAME,
-      streamToken: TOKEN_PROGRAM,
-      streamTokenPriceUsd: TOKEN_PRICE_USD,
-      aleoPriceUsd: ALEO_PRICE_USD,
-      priceExpiry: nowSeconds() + 3600n,
-      nonce: randomField(),
-    };
-    const priceSignature = signTokenPrice(adminKey, tokenPrice);
-    // usdValue does not depend on feeBps; resolve the tier from it, then fee.
-    const { usdValue } = computeStreamFee(
-      params.amount,
-      TOKEN_PRICE_USD,
-      ALEO_PRICE_USD,
-      0n,
-    );
-    const feeBps = await this.resolveFeeBps(usdValue);
+    
+    // Compute the stream fee from USD value with the flat fee basis points.
     const { streamFee } = computeStreamFee(
       params.amount,
       TOKEN_PRICE_USD,
       ALEO_PRICE_USD,
-      feeBps,
+      DEFAULT_FEE_BPS,
     );
-    // The credit record must cover the auto-withdrawal fee plus the stream
-    // fee (see the splits in `create_stream_private`).
+    
+    // Build the admin-signed stream fee attestation.
+    const tokenFee: StreamTokenFee = {
+      config: CONFIG_NAME,
+      streamToken: TOKEN_PROGRAM,
+      streamFeeAmount: streamFee,
+      expiry: nowSeconds() + 3600n,
+      nonce: randomField(),
+    };
+    const feeSignature = signStreamTokenFee(adminKey, tokenFee);
+    
+    // The credit record must cover the auto-withdrawal fee, the stream fee,
+    // and the 10k microcredit burn from credits.aleo::split.
     let autoWithdrawalFee = 0n;
     if (params.autoWithdrawable) {
       autoWithdrawalFee =
         config.platformFee + (params.duration / params.withdrawFrequency) * config.baseFee;
     }
-    console.log("auto-withdrawal fee:", autoWithdrawalFee, "stream fee:", streamFee);
-    const creditRecord = await this.findCredits(autoWithdrawalFee + streamFee);
+    console.log("auto-withdrawal fee:", autoWithdrawalFee, "stream fee:", streamFee, "split burn:", SPLIT_FEE);
+    const creditRecord = await this.findCredits(autoWithdrawalFee + streamFee + SPLIT_FEE);
     console.log("credit record:", creditRecord);
     const tokenRecord = await this.findToken(depositAmount);
     console.log("token record:", tokenRecord);
     const merkleProofs = await this.getComplianceProofs();
     console.log("merkle proofs:", merkleProofs);
+    
     const inputs = [
       createStreamParamsToPlaintext(params),
       identLiteral(TOKEN_PROGRAM),
       configToPlaintext(config),
-      tokenPriceToPlaintext(tokenPrice),
-      priceSignature,
-      `${feeBps}u64`,
+      streamTokenFeeToPlaintext(tokenFee),
+      feeSignature,
       creditRecord,
       tokenRecord,
       merkleProofs,
@@ -313,29 +310,31 @@ export class WalletPayrollService {
     fee: number = DEFAULT_FEE,
   ): Promise<string> {
     const config = await this.getConfigInput();
-    const tokenPrice: TokenPrice = {
-      config: CONFIG_NAME,
-      streamToken: TOKEN_PROGRAM,
-      streamTokenPriceUsd: TOKEN_PRICE_USD,
-      aleoPriceUsd: ALEO_PRICE_USD,
-      priceExpiry: nowSeconds() + 3600n,
-      nonce: randomField(),
-    };
-    const priceSignature = signTokenPrice(adminKey, tokenPrice);
-    const { usdValue } = computeStreamFee(
+    
+    // Compute the stream fee from USD value with the flat fee basis points.
+    const { streamFee } = computeStreamFee(
       params.amount,
       TOKEN_PRICE_USD,
       ALEO_PRICE_USD,
-      0n,
+      DEFAULT_FEE_BPS,
     );
-    const feeBps = await this.resolveFeeBps(usdValue);
+    
+    // Build the admin-signed stream fee attestation.
+    const tokenFee: StreamTokenFee = {
+      config: CONFIG_NAME,
+      streamToken: TOKEN_PROGRAM,
+      streamFeeAmount: streamFee,
+      expiry: nowSeconds() + 3600n,
+      nonce: randomField(),
+    };
+    const feeSignature = signStreamTokenFee(adminKey, tokenFee);
+    
     const inputs = [
       createStreamParamsToPlaintext(params),
       identLiteral(TOKEN_PROGRAM),
       configToPlaintext(config),
-      tokenPriceToPlaintext(tokenPrice),
-      priceSignature,
-      `${feeBps}u64`,
+      streamTokenFeeToPlaintext(tokenFee),
+      feeSignature,
     ];
     return this.execute("create_stream_public", inputs, fee, DYNAMIC_DISPATCH_IMPORTS);
   }
@@ -691,15 +690,7 @@ export class WalletPayrollService {
     };
   }
 
-  /**
-   * Resolve the stream fee basis points. The on-chain program no longer has
-   * per-config fee tiers, so a single flat `DEFAULT_FEE_BPS` is used for the
-   * admin-signed stream fee (the `usdValue` argument is accepted for API
-   * compatibility and ignored).
-   */
-  private async resolveFeeBps(_usdValue: bigint): Promise<bigint> {
-    return DEFAULT_FEE_BPS;
-  }
+
 
   /**
    * Build a Sealance Merkle exclusion proof showing the connected account is

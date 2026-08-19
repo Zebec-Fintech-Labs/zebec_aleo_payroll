@@ -53,9 +53,9 @@ plaintext to a single line. Selection rules:
 
 No account private key ever enters the app. The single exception is the
 **admin attestation key** field on the Employer page: `create_stream_private`
-verifies the `TokenPrice` against the config admin's Schnorr signature
+verifies the `StreamTokenFee` against the config admin's Schnorr signature
 on-chain, and wallets cannot reproduce `signValue` semantics, so the app signs
-with `signTokenPrice(adminKey, tokenPrice)` from `sdk/signing.ts`. The key is
+with `signStreamTokenFee(adminKey, tokenFee)` from `sdk/signing.ts`. The key is
 kept in component state only and cleared after a successful create — it is
 never persisted.
 
