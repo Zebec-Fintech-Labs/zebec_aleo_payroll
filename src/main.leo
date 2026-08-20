@@ -752,13 +752,13 @@ program test_zebec_payroll_v6.aleo {
 
         // ALEO fees are paid from the caller's public credits balance.
         let f_stream_fee_transfer: Final =
-            credits.aleo::transfer_public(config.fee_vault, token_fee.stream_fee_amount);
+            credits.aleo::transfer_public_as_signer(config.fee_vault, token_fee.stream_fee_amount);
         let f_auto_withdrawal_fee_transfer: Final =
-            credits.aleo::transfer_public(config.withdrawer, auto_withdrawal_fee);
+            credits.aleo::transfer_public_as_signer(config.withdrawer, auto_withdrawal_fee);
 
         // Pull the token deposit into the program's public balance.
         let f_deposit_transfer: Final =
-            IARC22@(token_program)::transfer_public(self_address, deposit_amount);
+            IARC22@(token_program)::transfer_from_public(caller, self_address, deposit_amount);
 
         return final {
             finalize_create_stream(params, config, token_fee, fee_signature, token_program, deposit_amount, caller, true);
