@@ -919,7 +919,7 @@ program test_zebec_payroll_v6.aleo {
 
         // Pull the top-up into the program's public balance
         let f_topup_transfer: Final =
-            IARC22@(payroll.token_program)::transfer_public(self_address, topup_amount);
+            IARC22@(payroll.token_program)::transfer_from_public(caller, self_address, topup_amount);
 
         return final {
             let real_now = std::ctx::block_timestamp();
