@@ -108,7 +108,7 @@ if (sender === receiver) {
     process.exit(1);
 }
 
-const CONFIG_NAME = configNameToField("Payroll_Config_002");
+const CONFIG_NAME = configNameToField("Payroll_Config_001");
 const TOKEN_PROGRAM = "test_usdcx_stablecoin";
 const TOKEN_PRICE_USD = 1_000_000n; // $1.00 per token, 6 decimals (used for off-chain fee quote only)
 const ALEO_PRICE_USD = 200_000n;  // $0.20 per ALEO, 6 decimals (used for off-chain fee quote only)

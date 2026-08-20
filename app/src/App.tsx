@@ -94,7 +94,7 @@ export default function App() {
       network={Network.TESTNET}
       decryptPermission={DecryptPermission.UponRequest}
       programs={[PROGRAM_ID, CREDITS_PROGRAM_ID, TOKEN_PROGRAM_ID, "test_usdcx_multisig_core.aleo", "test_usdcx_freezelist.aleo", "merkle_tree.aleo"]}
-      autoConnect={true}
+      autoConnect={false}
       onError={(error) => console.error(error)}
     >
       <WalletModalProvider>
