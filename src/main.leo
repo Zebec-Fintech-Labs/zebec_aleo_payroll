@@ -51,7 +51,7 @@ interface IARC22 {
         private recipient: address,
         public amount: u128,
     ) -> (ComplianceRecord, Token, Final);
-    fn transfer_public_as_signer(public recipient: address, public amount: u128) -> Final;
+    fn transfer_public_as_caller(public recipient: address, public amount: u128) -> Final;
 
     //=============================================================
     //               JOIN/SPLIT FUNCTIONS
@@ -83,10 +83,16 @@ struct WhitelistKey {
 // tokens are stored per config in the `whitelisted_token_programs` mapping
 // (keyed by `WhitelistKey`).
 struct PayrollConfig {
+    // admin address
     admin: address,
+    // fee vault address where fee for stream fees are stored
     fee_vault: address,
+    // address reponsible for withdrawing the payrolls on behalf of receiver
+    // when auto withdraw is enabled
     withdrawer: address,
+    // fee for single auto withdraw transaction. 
     base_fee: u64,
+    // fee for auto withdrawal platform service
     platform_fee: u64,
     initialized: bool,
 }
@@ -270,7 +276,7 @@ program test_zebec_payroll_v6.aleo {
         token_input_record: dyn record,
         sender_merkle_proofs: [MerkleProof; 2]
     ) -> (SenderPayrollTicket, ReceiverPayrollTicket, WithdrawerPayrollTicket, credits.aleo::credits, dyn record, dyn record, Final) {
-        let signer: address = std::ctx::signer();
+        let caller: address = std::ctx::caller();
         let self_address: address = std::ctx::addr();
 
         assert_create_params(params);
@@ -301,12 +307,12 @@ program test_zebec_payroll_v6.aleo {
         let (auto_change, f_auto_withdrawal_fee_transfer): (credits.aleo::credits, Final) =
             credits.aleo::transfer_private_to_public(change1, config.withdrawer, auto_withdrawal_fee);
 
-        // Return `fee_change` (the ALEO balance beyond fees) to the signer so
+        // Return `fee_change` (the ALEO balance beyond fees) to the caller so
         // no value is burned.
         let (fee_change, f_stream_fee_transfer): (credits.aleo::credits, Final) =
             credits.aleo::transfer_private_to_public(change2, config.fee_vault, token_fee.stream_fee_amount);
 
-        // Return the token change and compliance record to the signer;
+        // Return the token change and compliance record to the caller;
         // discarding them would destroy value.
         let (deposit_comp, deposit_change, f_deposit_amount_transfer): (dyn record, dyn record, Final) =
             IARC22@(token_program)::transfer_private_to_public(
@@ -314,7 +320,7 @@ program test_zebec_payroll_v6.aleo {
             );
 
         let sender_ticket = SenderPayrollTicket {
-            owner: signer,
+            owner: caller,
             ticket_type: 0u8,
             config: config.config_name,
             stream_id: params.stream_id,
@@ -331,7 +337,7 @@ program test_zebec_payroll_v6.aleo {
             owner: params.receiver,
             ticket_type: 1u8,
             config: config.config_name,
-            sender: signer,
+            sender: caller,
             token_program: token_program,
             full_amount: params.amount,
             auto_withdrawable: params.auto_withdrawable,
@@ -344,14 +350,14 @@ program test_zebec_payroll_v6.aleo {
             config: config.config_name,
             full_amount: params.amount,
             stream_id: params.stream_id,
-            sender: signer,
+            sender: caller,
             receiver: params.receiver,
             token_program: token_program,
             auto_withdrawable: params.auto_withdrawable,
         };
 
         return (sender_ticket, receiver_ticket, withdrawer_ticket, fee_change, deposit_change, deposit_comp, final {
-            finalize_create_stream(params, config, token_fee, fee_signature, token_program, deposit_amount, signer, false);
+            finalize_create_stream(params, config, token_fee, fee_signature, token_program, deposit_amount, caller, false);
             f_auto_withdrawal_fee_transfer.run();
             f_stream_fee_transfer.run();
             f_deposit_amount_transfer.run();
@@ -361,9 +367,9 @@ program test_zebec_payroll_v6.aleo {
     fn pause_resume_stream_private(
         ticket_record: SenderPayrollTicket,
     ) -> (SenderPayrollTicket, Final) {
-        let signer: address = std::ctx::signer();
-        // Check signer is the sender payroll ticket owner.
-        assert(signer == ticket_record.owner);
+        let caller: address = std::ctx::caller();
+        // Check caller is the sender payroll ticket owner.
+        assert(caller == ticket_record.owner);
 
         // Check if stream is pausable.
         assert(ticket_record.is_pausable);
@@ -374,14 +380,14 @@ program test_zebec_payroll_v6.aleo {
             let now: i64 = std::ctx::block_timestamp();
             // Check: stream exists.
             assert(stream_anchors.contains(stream_id));
-            let stream = stream_anchors.get(stream_id);
+            let stream_anchor = stream_anchors.get(stream_id);
             // Check: stream is not canceled.
-            assert(!stream.canceled);
+            assert(!stream_anchor.canceled);
             // Check: stream has started.
-            assert(stream.start_time <= now);
+            assert(stream_anchor.start_time <= now);
 
-            let updated_stream = apply_pause_toggle(stream, now);
-            stream_anchors.set(stream_id, updated_stream);
+            let updated_stream_anchor = apply_pause_toggle(stream_anchor, now);
+            stream_anchors.set(stream_id, updated_stream_anchor);
         });
     }
 
@@ -401,10 +407,10 @@ program test_zebec_payroll_v6.aleo {
         stream_anchor: StreamAnchor,
         now: i64,
     ) -> (dyn record, dyn record, dyn record, dyn record, Final) {
-        let signer: address = std::ctx::signer();
+        let caller: address = std::ctx::caller();
 
-        // Check: signer is the sender payroll ticket owner.
-        assert(signer == ticket_record.owner);
+        // Check: caller is the sender payroll ticket owner.
+        assert(caller == ticket_record.owner);
         assert(ticket_record.is_cancelable);
         assert(stream_anchor.initialized);
         assert(stream_anchor.stream_id == ticket_record.stream_id);
@@ -458,16 +464,16 @@ program test_zebec_payroll_v6.aleo {
             assert(now <= real_now);
             // Check: stream exists.
             assert(stream_anchors.contains(stream_id));
-            let stream = stream_anchors.get(stream_id);
+            let onchain_stream_anchor = stream_anchors.get(stream_id);
             // Check: on-chain anchor matches the caller-supplied snapshot.
-            assert_stream_anchor_eq(stream_anchor, stream);
+            assert_stream_anchor_eq(stream_anchor, onchain_stream_anchor);
 
-            let canceled_stream = StreamAnchor {
-                ..stream
+            let canceled_stream_anchor = StreamAnchor {
+                ..onchain_stream_anchor
             };
-            canceled_stream.canceled = true;
-            canceled_stream.canceled_at = now;
-            stream_anchors.set(stream_id, canceled_stream);
+            canceled_stream_anchor.canceled = true;
+            canceled_stream_anchor.canceled_at = now;
+            stream_anchors.set(stream_id, canceled_stream_anchor);
 
             f_sender_amount_transfer.run();
             f_receiver_amount_transfer.run();
@@ -489,11 +495,11 @@ program test_zebec_payroll_v6.aleo {
         token_input_record: dyn record,
         sender_merkle_proofs: [MerkleProof; 2]
     ) -> (SenderPayrollTicket, dyn record, dyn record, Final) {
-        let signer: address = std::ctx::signer();
+        let caller: address = std::ctx::caller();
         let self_address: address = std::ctx::addr();
 
-        // Check: signer is the sender payroll ticket owner.
-        assert(signer == ticket_record.owner);
+        // Check: caller is the sender payroll ticket owner.
+        assert(caller == ticket_record.owner);
         // Check: stream was created with top-up enabled.
         assert(ticket_record.can_topup);
         assert(stream_anchor.initialized);
@@ -523,9 +529,6 @@ program test_zebec_payroll_v6.aleo {
         assert(extra_seconds_u128 <= I64_MAX);
         let extra_seconds: i64 = extra_seconds_u128 as i64;
 
-        let token_input_record_amount: u128 = token_input_record.amount as u128;
-        assert(token_input_record_amount >= topup_amount);
-
         // Pull the top-up into the program's public balance (same pattern as
         // the create_stream_private deposit). The sender's token change record
         // and the compliance record are re-emitted as outputs — discarding
@@ -547,19 +550,19 @@ program test_zebec_payroll_v6.aleo {
             assert(now <= real_now);
             // Check: stream exists.
             assert(stream_anchors.contains(stream_id));
-            let stream = stream_anchors.get(stream_id);
+            let onchain_stream_anchor = stream_anchors.get(stream_id);
             // Check: on-chain anchor matches the caller-supplied snapshot.
-            assert_stream_anchor_eq(stream_anchor, stream);
+            assert_stream_anchor_eq(stream_anchor, onchain_stream_anchor);
 
-            let updated_stream = StreamAnchor {
-                ..stream
+            let updated_stream_anchor = StreamAnchor {
+                ..onchain_stream_anchor
             };
-            updated_stream.deposited_amount = stream.deposited_amount + topup_amount;
+            updated_stream_anchor.deposited_amount = onchain_stream_anchor.deposited_amount + topup_amount;
             // Advance covered_until monotonically: a debt-only topup
             // (extra == 0) must not erase forward coverage purchased earlier.
-            let coverage_base: i64 = stream.covered_until > stream_time_now ? stream.covered_until : stream_time_now;
-            updated_stream.covered_until = coverage_base + extra_seconds;
-            stream_anchors.set(stream_id, updated_stream);
+            let coverage_base: i64 = onchain_stream_anchor.covered_until > stream_time_now ? onchain_stream_anchor.covered_until : stream_time_now;
+            updated_stream_anchor.covered_until = coverage_base + extra_seconds;
+            stream_anchors.set(stream_id, updated_stream_anchor);
 
             f_topup_transfer.run();
         });
@@ -573,10 +576,10 @@ program test_zebec_payroll_v6.aleo {
         stream_anchor: StreamAnchor,
         now: i64,
     ) -> (ReceiverPayrollTicket, dyn record, dyn record, Final) {
-        let signer: address = std::ctx::signer();
+        let caller: address = std::ctx::caller();
 
-        // Check: signer is the receiver payroll ticket owner.
-        assert(signer == ticket_record.owner);
+        // Check: caller is the receiver payroll ticket owner.
+        assert(caller == ticket_record.owner);
         assert(stream_anchor.initialized);
         assert(stream_anchor.start_time <= now);
         assert(!stream_anchor.canceled);
@@ -624,16 +627,16 @@ program test_zebec_payroll_v6.aleo {
             assert(now <= real_now);
             // Check: stream exists.
             assert(stream_anchors.contains(stream_id));
-            let stream = stream_anchors.get(stream_id);
+            let onchain_stream_anchor = stream_anchors.get(stream_id);
             // Check: on-chain anchor matches the caller-supplied snapshot.
-            assert_stream_anchor_eq(stream_anchor, stream);
+            assert_stream_anchor_eq(stream_anchor, onchain_stream_anchor);
 
-            let withdrawn_amount: u128 = stream.withdrawn_amount + capped_withdrawable_amount;
-            let updated_stream = StreamAnchor {
-                ..stream
+            let withdrawn_amount: u128 = onchain_stream_anchor.withdrawn_amount + capped_withdrawable_amount;
+            let updated_stream_anchor = StreamAnchor {
+                ..onchain_stream_anchor
             };
-            updated_stream.withdrawn_amount = withdrawn_amount;
-            stream_anchors.set(stream_id, updated_stream);
+            updated_stream_anchor.withdrawn_amount = withdrawn_amount;
+            stream_anchors.set(stream_id, updated_stream_anchor);
 
             f_receiver_amount_transfer.run();
         });
@@ -648,11 +651,11 @@ program test_zebec_payroll_v6.aleo {
         stream_anchor: StreamAnchor,
         now: i64
     ) -> (WithdrawerPayrollTicket, dyn record, dyn record, Final) {
-        let signer: address = std::ctx::signer();
+        let caller: address = std::ctx::caller();
 
-        // Check: signer is the config withdrawer and owns the withdrawer ticket.
-        assert(signer == config.withdrawer);
-        assert(signer == ticket_record.owner);
+        // Check: caller is the config withdrawer and owns the withdrawer ticket.
+        assert(caller == config.withdrawer);
+        assert(caller == ticket_record.owner);
         // Check: ticket belongs to this config (tenant binding).
         assert(ticket_record.config == config.config_name);
         // Check: stream was created with auto-withdrawal enabled.
@@ -710,16 +713,16 @@ program test_zebec_payroll_v6.aleo {
 
             // Check: stream exists.
             assert(stream_anchors.contains(stream_id));
-            let stream = stream_anchors.get(stream_id);
+            let onchain_stream_anchor = stream_anchors.get(stream_id);
             // Check: on-chain anchor matches the caller-supplied snapshot.
-            assert_stream_anchor_eq(stream_anchor, stream);
+            assert_stream_anchor_eq(stream_anchor, onchain_stream_anchor);
         
-            let withdrawn_amount: u128 = stream.withdrawn_amount + capped_withdrawable_amount;
-            let updated_stream = StreamAnchor {
-                ..stream
+            let withdrawn_amount: u128 = onchain_stream_anchor.withdrawn_amount + capped_withdrawable_amount;
+            let updated_stream_anchor = StreamAnchor {
+                ..onchain_stream_anchor
             };
-            updated_stream.withdrawn_amount = withdrawn_amount;
-            stream_anchors.set(stream_id, updated_stream);
+            updated_stream_anchor.withdrawn_amount = withdrawn_amount;
+            stream_anchors.set(stream_id, updated_stream_anchor);
 
             f_receiver_amount_transfer.run();
         });
@@ -732,7 +735,7 @@ program test_zebec_payroll_v6.aleo {
         token_fee: StreamTokenFee,
         fee_signature: signature,
     ) -> Final {
-        let signer: address = std::ctx::signer();
+        let caller: address = std::ctx::caller();
         let self_address: address = std::ctx::addr();
 
         assert_create_params(params);
@@ -747,20 +750,18 @@ program test_zebec_payroll_v6.aleo {
             ? compute_auto_withdrawal_fee(params.duration, safe_frequency, config.base_fee, config.platform_fee)
             : 0u64;
 
-        // ALEO fees are paid from the signer's public credits balance.
+        // ALEO fees are paid from the caller's public credits balance.
         let f_stream_fee_transfer: Final =
-            credits.aleo::transfer_public_as_signer(config.fee_vault, token_fee.stream_fee_amount);
+            credits.aleo::transfer_public(config.fee_vault, token_fee.stream_fee_amount);
         let f_auto_withdrawal_fee_transfer: Final =
-            credits.aleo::transfer_public_as_signer(config.withdrawer, auto_withdrawal_fee);
+            credits.aleo::transfer_public(config.withdrawer, auto_withdrawal_fee);
 
         // Pull the token deposit into the program's public balance.
-        // Prerequisite: the sender must have called `approve_public` on the
-        // token program, approving this program for at least `deposit_amount`.
         let f_deposit_transfer: Final =
-            IARC22@(token_program)::transfer_from_public(signer, self_address, deposit_amount);
+            IARC22@(token_program)::transfer_public(self_address, deposit_amount);
 
         return final {
-            finalize_create_stream(params, config, token_fee, fee_signature, token_program, deposit_amount, signer, true);
+            finalize_create_stream(params, config, token_fee, fee_signature, token_program, deposit_amount, caller, true);
             f_stream_fee_transfer.run();
             f_auto_withdrawal_fee_transfer.run();
             f_deposit_transfer.run();
@@ -770,29 +771,29 @@ program test_zebec_payroll_v6.aleo {
     fn pause_resume_stream_public(
         stream_id: field,
     ) -> Final {
-        let signer: address = std::ctx::signer();
+        let caller: address = std::ctx::caller();
         
         return final {
             let now: i64 = std::ctx::block_timestamp();
 
-            // Check: payroll exists and signer is the sender.
+            // Check: payroll exists and caller is the sender.
             assert(payrolls.contains(stream_id));
             let payroll = payrolls.get(stream_id);
-            assert(signer == payroll.sender);
+            assert(caller == payroll.sender);
             assert(payroll.is_pausable);
 
             // Check: stream exists.
             assert(stream_anchors.contains(stream_id));
 
-            let anchor = stream_anchors.get(stream_id);
+            let stream_anchor = stream_anchors.get(stream_id);
             // Check: stream is not canceled.
-            assert(!anchor.canceled);
-            assert(anchor.is_public);
+            assert(!stream_anchor.canceled);
+            assert(stream_anchor.is_public);
             // Check: stream has started.
-            assert(anchor.start_time <= now);
+            assert(stream_anchor.start_time <= now);
 
-            let updated_anchor = apply_pause_toggle(anchor, now);
-            stream_anchors.set(stream_id, updated_anchor);
+            let updated_stream_anchor = apply_pause_toggle(stream_anchor, now);
+            stream_anchors.set(stream_id, updated_stream_anchor);
         };
     }
 
@@ -803,10 +804,10 @@ program test_zebec_payroll_v6.aleo {
         stream_anchor: StreamAnchor,
         now: i64,
     ) -> Final {
-        let signer: address = std::ctx::signer();
+        let caller: address = std::ctx::caller();
 
-        // Check: signer is the sender.
-        assert(signer == payroll.sender);
+        // Check: caller is the sender.
+        assert(caller == payroll.sender);
         assert(payroll.is_cancelable);
         assert(payroll.initialized);
         assert(stream_anchor.stream_id == payroll.stream_id);
@@ -860,18 +861,101 @@ program test_zebec_payroll_v6.aleo {
             assert_payroll_eq(payroll, onchain_payroll);
             // Check: stream exists and anchor matches.
             assert(stream_anchors.contains(stream_anchor.stream_id));
-            let onchain_anchor = stream_anchors.get(stream_anchor.stream_id);
-            assert_stream_anchor_eq(stream_anchor, onchain_anchor);
+            let onchain_stream_anchor = stream_anchors.get(stream_anchor.stream_id);
+            assert_stream_anchor_eq(stream_anchor, onchain_stream_anchor);
 
-            let canceled_stream = StreamAnchor {
-                ..onchain_anchor
+            let canceled_stream_anchor = StreamAnchor {
+                ..onchain_stream_anchor
             };
-            canceled_stream.canceled = true;
-            canceled_stream.canceled_at = now;
-            stream_anchors.set(stream_anchor.stream_id, canceled_stream);
+            canceled_stream_anchor.canceled = true;
+            canceled_stream_anchor.canceled_at = now;
+            stream_anchors.set(stream_anchor.stream_id, canceled_stream_anchor);
 
             f_sender_amount_transfer.run();
             f_receiver_amount_transfer.run();
+        };
+    }
+
+    fn topup_stream_public(
+        payroll: Payroll,
+        stream_anchor: StreamAnchor,
+        extra: u128,
+        now: i64,
+    ) -> Final {
+        let caller: address = std::ctx::caller();
+        let self_address: address = std::ctx::addr();
+
+        // Check: caller is the payroll sender.
+        assert(caller == payroll.sender);
+        // Check: stream was created with top-up enabled.
+        assert(payroll.initialized);
+        assert(payroll.can_topup);
+        assert(stream_anchor.initialized);
+        assert(stream_anchor.stream_id == payroll.stream_id);
+        assert(!stream_anchor.canceled);
+        assert(stream_anchor.is_public);
+        // Check: buffer-mode streams have a non-zero covered_until.
+        assert(stream_anchor.covered_until > 0i64);
+
+        let effective_time: i64 = stream_anchor.paused ? stream_anchor.last_paused_time : now;
+        // Check: stream has started.
+        assert(stream_anchor.start_time <= effective_time);
+        // Check: stream has not ended.
+        let elapsed_duration: u64 = (effective_time as u64 - stream_anchor.start_time as u64) - stream_anchor.paused_interval;
+        assert(elapsed_duration < stream_anchor.duration);
+
+        // Debt in stream time: paused durations do not accrue debt.
+        let stream_time_now: i64 = effective_time - stream_anchor.paused_interval as i64;
+        let debt_seconds: i64 = stream_time_now > stream_anchor.covered_until ? stream_time_now - stream_anchor.covered_until : 0i64;
+        let debt_amount: u128 = debt_seconds as u128 * payroll.full_amount / stream_anchor.duration as u128;
+
+        let topup_amount: u128 = debt_amount + extra;
+        assert(topup_amount > 0u128);
+
+        // Extra covered seconds bought by the optional `extra` pre-payment.
+        let extra_seconds_u128: u128 = extra * stream_anchor.duration as u128 / payroll.full_amount;
+        assert(extra_seconds_u128 <= I64_MAX);
+        let extra_seconds: i64 = extra_seconds_u128 as i64;
+
+        // Pull the top-up into the program's public balance
+        let f_topup_transfer: Final =
+            IARC22@(payroll.token_program)::transfer_public(self_address, topup_amount);
+
+        return final {
+            let real_now = std::ctx::block_timestamp();
+            // Check: caller-supplied `now` is within 2 minutes (NOW_TOLERANCE) of block time.
+            assert_within_tolerance(real_now, now);
+            // Reject a caller-supplied `now` in the future: debt inflation risk.
+            assert(now <= real_now);
+            assert(stream_anchor.stream_id == payroll.stream_id);
+            // Check: payroll exists and matches.
+            let stream_id = payroll.stream_id;
+            assert(payrolls.contains(stream_id));
+            let onchain_payroll = payrolls.get(stream_id);
+            assert_payroll_eq(payroll, onchain_payroll);
+            // Check: stream exists.
+            assert(stream_anchors.contains(stream_id));
+            let onchain_stream_anchor = stream_anchors.get(stream_id);
+            // Check: on-chain anchor matches the caller-supplied snapshot.
+            assert_stream_anchor_eq(stream_anchor, onchain_stream_anchor);
+
+            let updated_payroll = Payroll {
+                ..onchain_payroll
+            };
+            updated_payroll.topup_count = onchain_payroll.topup_count + 1u64;
+            payrolls.set(stream_id, updated_payroll);
+
+            let updated_stream_anchor = StreamAnchor {
+                ..onchain_stream_anchor
+            };
+            updated_stream_anchor.deposited_amount = onchain_stream_anchor.deposited_amount + topup_amount;
+            // Advance covered_until monotonically: a debt-only topup
+            // (extra == 0) must not erase forward coverage purchased earlier.
+            let coverage_base: i64 = onchain_stream_anchor.covered_until > stream_time_now ? onchain_stream_anchor.covered_until : stream_time_now;
+            updated_stream_anchor.covered_until = coverage_base + extra_seconds;
+            stream_anchors.set(payroll.stream_id, updated_stream_anchor);
+
+            f_topup_transfer.run();
         };
     }
 
@@ -879,13 +963,14 @@ program test_zebec_payroll_v6.aleo {
     // own public balance; no allowance required).
     fn withdraw_stream_public(
         payroll: Payroll,
+        config: Config,
         stream_anchor: StreamAnchor,
         now: i64,
     ) -> Final {
-        let signer: address = std::ctx::signer();
+        let caller: address = std::ctx::caller();
 
-        // Check: signer is the receiver.
-        assert(signer == payroll.receiver);
+        // Check: caller is the config's withdrawer.
+        assert(caller == config.withdrawer);
         assert(payroll.stream_id == stream_anchor.stream_id);
         assert(payroll.initialized);
         // Check: Stream has started
@@ -936,15 +1021,93 @@ program test_zebec_payroll_v6.aleo {
             assert_payroll_eq(payroll, onchain_payroll);
             // Check: stream exists and anchor matches.
             assert(stream_anchors.contains(stream_anchor.stream_id));
-            let onchain_anchor = stream_anchors.get(stream_anchor.stream_id);
-            assert_stream_anchor_eq(stream_anchor, onchain_anchor);
+            let onchain_stream_anchor = stream_anchors.get(stream_anchor.stream_id);
+            assert_stream_anchor_eq(stream_anchor, onchain_stream_anchor);
         
-            let withdrawn_amount: u128 = onchain_anchor.withdrawn_amount + capped_withdrawable_amount;
-            let updated_anchor = StreamAnchor {
-                ..onchain_anchor
+            let withdrawn_amount: u128 = onchain_stream_anchor.withdrawn_amount + capped_withdrawable_amount;
+            let updated_stream_anchor = StreamAnchor {
+                ..onchain_stream_anchor
             };
-            updated_anchor.withdrawn_amount = withdrawn_amount;
-            stream_anchors.set(stream_anchor.stream_id, updated_anchor);
+            updated_stream_anchor.withdrawn_amount = withdrawn_amount;
+            stream_anchors.set(stream_anchor.stream_id, updated_stream_anchor);
+
+            f_receiver_amount_transfer.run();
+        };
+    }
+
+    fn withdraw_stream_auto_public(
+        payroll: Payroll,
+        config: Config,
+        stream_anchor: StreamAnchor,
+        now: i64,
+    ) -> Final {
+        let caller: address = std::ctx::caller();
+
+        // Check: caller is the config withdrawer.
+        assert(caller == config.withdrawer);
+        assert(payroll.stream_id == stream_anchor.stream_id);
+        assert(payroll.initialized); 
+        // Check: Stream has started
+        assert(stream_anchor.initialized);
+        assert(stream_anchor.start_time <= now);
+        assert(!stream_anchor.canceled);
+        assert(stream_anchor.is_public);
+
+        let effective_time: i64 = stream_anchor.paused ? stream_anchor.last_paused_time : now;
+        // Check: stream has started.
+        assert(stream_anchor.start_time <= effective_time);
+        // Check: full amount is not yet withdrawn.
+        assert(stream_anchor.withdrawn_amount < payroll.full_amount);
+        assert(stream_anchor.deposited_amount > stream_anchor.withdrawn_amount);
+
+        // Buffer mode: cap accrual at the funded coverage window.
+        let accrual_time: i64 = (stream_anchor.covered_until > 0i64 && effective_time > stream_anchor.covered_until) ? stream_anchor.covered_until : effective_time;
+
+        let (total_withdrawable_amount, currently_withdrawable_amount) = compute_withdrawable_amount(
+            accrual_time,
+            stream_anchor.start_time,
+            stream_anchor.duration,
+            stream_anchor.paused_interval,
+            payroll.full_amount,
+            stream_anchor.withdrawn_amount
+        );
+
+        assert(total_withdrawable_amount <= payroll.full_amount);
+        let available_withdraw_amount: u128 = stream_anchor.deposited_amount - stream_anchor.withdrawn_amount;
+        // Buffer mode: payout capped at the funded remainder.
+        let capped_withdrawable_amount: u128 = currently_withdrawable_amount <= available_withdraw_amount ? currently_withdrawable_amount : available_withdraw_amount;
+
+        let f_receiver_amount_transfer: Final
+            = IARC22@(payroll.token_program)::transfer_public(
+                payroll.receiver, capped_withdrawable_amount
+            );
+        
+        return final {
+            let real_now = std::ctx::block_timestamp();
+            // Check: caller-supplied `now` is within 2 minutes (NOW_TOLERANCE) of block time.
+            assert_within_tolerance(real_now, now);
+            assert(now <= real_now);
+
+            assert(payroll.stream_id == stream_anchor.stream_id);
+            // Check: payroll exists and matches.
+            assert(payrolls.contains(payroll.stream_id));
+            let onchain_payroll = payrolls.get(payroll.stream_id);
+            assert_payroll_eq(payroll, onchain_payroll);
+            // Check: config exists and matches.
+            assert(payroll_configs.contains(config.config_name));
+            let chain_config: PayrollConfig = payroll_configs.get(config.config_name);
+            assert_config_fields(chain_config, config);
+            // Check: stream exists and anchor matches.
+            assert(stream_anchors.contains(stream_anchor.stream_id));
+            let onchain_stream_anchor = stream_anchors.get(stream_anchor.stream_id);
+            assert_stream_anchor_eq(stream_anchor, onchain_stream_anchor);
+        
+            let withdrawn_amount: u128 = onchain_stream_anchor.withdrawn_amount + capped_withdrawable_amount;
+            let updated_stream_anchor = StreamAnchor {
+                ..onchain_stream_anchor
+            };
+            updated_stream_anchor.withdrawn_amount = withdrawn_amount;
+            stream_anchors.set(stream_anchor.stream_id, updated_stream_anchor);
 
             f_receiver_amount_transfer.run();
         };
@@ -1070,19 +1233,20 @@ final fn finalize_create_stream(
     fee_signature: signature,
     token_program: identifier,
     deposit_amount: u128,
-    signer: address,
+    caller: address,
     is_public: bool,
 ) {
     let now: i64 = std::ctx::block_timestamp();
 
     // Checks: stream parameter validation.
     assert(params.duration > 0u64);
-    assert(params.receiver != signer);
+    assert(params.receiver != caller);
     assert(params.amount > 0u128);
     assert(params.start_now || params.start_time >= now);
     assert(!params.can_topup || (params.initial_buffer_amount > 0u128 && params.initial_buffer_amount <= params.amount));
 
-    // Checks: config & fee re-verification.
+    // Checks: config fields matches on chain config
+    assert(payroll_configs.contains(config.config_name));
     let chain_config: PayrollConfig = payroll_configs.get(config.config_name);
     assert_config_fields(chain_config, config);
 
@@ -1141,7 +1305,7 @@ final fn finalize_create_stream(
         let payroll = Payroll {
             stream_id: params.stream_id,
             config: config.config_name,
-            sender: signer,
+            sender: caller,
             receiver: params.receiver,
             full_amount: params.amount,
             token_program: token_program,
