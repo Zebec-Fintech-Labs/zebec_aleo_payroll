@@ -12,7 +12,13 @@ import {
 } from "@provablehq/sdk/testnet.js";
 
 import { tokenAllowanceKey, whitelistKey } from "./hashing.js";
-import { computeTopupAmount, computeWithdrawableAmount, nowSeconds } from "./math.js";
+import {
+  computeAutoWithdrawalFee,
+  computeTopupAmount,
+  computeWithdrawableAmount,
+  nowSeconds,
+  SPLIT_FEE,
+} from "./math.js";
 import {
   configToPlaintext,
   createStreamParamsToPlaintext,
@@ -23,7 +29,10 @@ import {
   parseIntLiteral,
   parsePayroll,
   parsePayrollConfig,
+  parseReceiverTicket,
+  parseSenderTicket,
   parseStreamAnchor,
+  parseWithdrawerTicket,
   payrollToPlaintext,
   streamAnchorToPlaintext,
   streamTokenFeeToPlaintext,
@@ -118,13 +127,16 @@ export class PayrollService {
   ): Promise<string> {
     const depositAmount = params.canTopup ? params.initialBufferAmount : params.amount;
     const streamFee = tokenFee.streamFeeAmount;
-    let autoWithdrawalFee = 0n;
-    if (params.autoWithdrawable) {
-      autoWithdrawalFee =
-        config.platformFee + (params.duration / params.withdrawFrequency) * config.baseFee;
-    }
-    // Include the 10,000 microcredit split burn in the minimum required.
-    const SPLIT_FEE = 10_000n;
+    // Exact mirror of the on-chain fee math (multiply before divide); a
+    // lower estimate would make the credit-record coverage assert fail.
+    const autoWithdrawalFee = params.autoWithdrawable
+      ? computeAutoWithdrawalFee(
+          params.duration,
+          params.withdrawFrequency,
+          config.baseFee,
+          config.platformFee,
+        )
+      : 0n;
     const creditRecord =
       options.creditRecord !== undefined
         ? options.creditRecord.toString()
@@ -178,9 +190,10 @@ export class PayrollService {
     options: ExecuteOptions = {},
   ): Promise<string> {
     const ticketRecord = ticket?.toString() ?? (await this.findTicket("SenderPayrollTicket", streamId));
+    const senderTicket = parseSenderTicket(ticketRecord);
     const anchor = await this.getStreamAnchor(streamId);
     const inputs = [ticketRecord, streamAnchorToPlaintext(anchor), `${now}i64`];
-    return this.execute("cancel_stream_private", inputs, options, await this.ticketTokenImport(ticketRecord));
+    return this.execute("cancel_stream_private", inputs, options, await this.ticketTokenImport(senderTicket.tokenProgram));
   }
 
   /**
@@ -194,9 +207,10 @@ export class PayrollService {
     options: ExecuteOptions = {},
   ): Promise<string> {
     const ticketRecord = ticket?.toString() ?? (await this.findTicket("ReceiverPayrollTicket", streamId));
+    const receiverTicket = parseReceiverTicket(ticketRecord);
     const anchor = await this.getStreamAnchor(streamId);
     const inputs = [ticketRecord, streamAnchorToPlaintext(anchor), `${now}i64`];
-    return this.execute("withdraw_stream_private", inputs, options, await this.ticketTokenImport(ticketRecord));
+    return this.execute("withdraw_stream_private", inputs, options, await this.ticketTokenImport(receiverTicket.tokenProgram));
   }
 
   /**
@@ -213,6 +227,7 @@ export class PayrollService {
   ): Promise<string> {
     const ticketRecord =
       ticket?.toString() ?? (await this.findTicket("WithdrawerPayrollTicket", streamId));
+    const withdrawerTicket = parseWithdrawerTicket(ticketRecord);
     const anchor = await this.getStreamAnchor(streamId);
     const inputs = [
       ticketRecord,
@@ -220,12 +235,9 @@ export class PayrollService {
       streamAnchorToPlaintext(anchor),
       `${now}i64`,
     ];
-    const tokenMatch = /token_program:\s*([a-zA-Z0-9_]+)/.exec(ticketRecord);
-    if (tokenMatch === null) {
-      throw new Error("could not parse token_program from the ticket record");
-    }
+    const tokenProgramId = `${withdrawerTicket.tokenProgram}.aleo`;
     return this.execute("withdraw_stream_auto_private", inputs, options, {
-      [`${tokenMatch[1]}.aleo`]: await this.loadProgramSource(`${tokenMatch[1]}.aleo`),
+      [tokenProgramId]: await this.loadProgramSource(tokenProgramId),
     });
   }
 
@@ -247,14 +259,10 @@ export class PayrollService {
   ): Promise<string> {
     const ticketRecord =
       options.ticket?.toString() ?? (await this.findTicket("SenderPayrollTicket", streamId));
+    const senderTicket = parseSenderTicket(ticketRecord);
     const anchor = await this.getStreamAnchor(streamId);
-    const tokenMatch = /token_program:\s*([a-zA-Z0-9_]+)/.exec(ticketRecord);
-    const amountMatch = /full_amount:\s*(\d+)u128/.exec(ticketRecord);
-    if (tokenMatch === null || amountMatch === null) {
-      throw new Error("could not parse token_program / full_amount from the ticket record");
-    }
-    const tokenProgramId = `${tokenMatch[1]}.aleo`;
-    const { topupAmount } = computeTopupAmount(anchor, BigInt(amountMatch[1]!), now, extra);
+    const tokenProgramId = `${senderTicket.tokenProgram}.aleo`;
+    const { topupAmount } = computeTopupAmount(anchor, senderTicket.fullAmount, now, extra);
     const tokenRecord =
       options.tokenRecord?.toString() ?? (await this.findToken(tokenProgramId, topupAmount));
     const inputs = [
@@ -354,6 +362,68 @@ export class PayrollService {
     ];
     const tokenProgramId = `${payrollValue.tokenProgram}.aleo`;
     return this.execute("withdraw_stream_public", inputs, options, {
+      [tokenProgramId]: await this.loadProgramSource(tokenProgramId),
+    });
+  }
+
+  /**
+   * Execute `topup_stream_public`: pay the accrued debt of a buffer-mode
+   * public stream plus `extra` pre-paid coverage. The signer must be the
+   * payroll's sender and must have approved this program on the token (the
+   * deposit is pulled from the signer's public balance via
+   * `IARC22::transfer_from_public`). The payroll and on-chain anchor are
+   * resolved automatically when omitted.
+   */
+  async topupStreamPublic(
+    streamId: string | bigint,
+    extra: bigint,
+    now: bigint = nowSeconds(),
+    payroll?: Payroll,
+    options: ExecuteOptions = {},
+  ): Promise<string> {
+    const payrollValue = payroll ?? (await this.getPayroll(streamId));
+    const anchor = await this.getStreamAnchor(streamId);
+    // Fail fast when there is nothing to pay: the on-chain entry asserts
+    // `debt_amount + extra > 0` with the same pause-aware debt math.
+    const { topupAmount } = computeTopupAmount(anchor, payrollValue.fullAmount, now, extra);
+    if (topupAmount <= 0n) {
+      throw new Error("top-up amount is zero: no accrued debt and no extra pre-payment");
+    }
+    const inputs = [
+      payrollToPlaintext(payrollValue),
+      streamAnchorToPlaintext(anchor),
+      `${extra}u128`,
+      `${now}i64`,
+    ];
+    const tokenProgramId = `${payrollValue.tokenProgram}.aleo`;
+    return this.execute("topup_stream_public", inputs, options, {
+      [tokenProgramId]: await this.loadProgramSource(tokenProgramId),
+    });
+  }
+
+  /**
+   * Execute `withdraw_stream_auto_public`: pay out the receiver's accrued
+   * amount on behalf of the receiver. Withdrawer only — the signer must be
+   * the config's withdrawer. The payroll and on-chain anchor are resolved
+   * automatically when omitted.
+   */
+  async withdrawAutoPublic(
+    streamId: string | bigint,
+    config: Config,
+    now: bigint = nowSeconds(),
+    payroll?: Payroll,
+    options: ExecuteOptions = {},
+  ): Promise<string> {
+    const payrollValue = payroll ?? (await this.getPayroll(streamId));
+    const anchor = await this.getStreamAnchor(streamId);
+    const inputs = [
+      payrollToPlaintext(payrollValue),
+      configToPlaintext(config),
+      streamAnchorToPlaintext(anchor),
+      `${now}i64`,
+    ];
+    const tokenProgramId = `${payrollValue.tokenProgram}.aleo`;
+    return this.execute("withdraw_stream_auto_public", inputs, options, {
       [tokenProgramId]: await this.loadProgramSource(tokenProgramId),
     });
   }
@@ -489,7 +559,10 @@ export class PayrollService {
 
   /**
    * Preview the withdrawable amounts of a stream at `now` by combining the
-   * on-chain anchor with the off-chain vesting math.
+   * on-chain anchor with the off-chain vesting math. Mirrors the payout logic
+   * of `withdraw_stream_private` / `withdraw_stream_public`: in buffer mode
+   * (`covered_until > 0`) accrual is capped at the funded coverage window and
+   * the payout is capped at the funded remainder.
    */
   async getWithdrawableAmounts(
     streamId: string | bigint,
@@ -497,17 +570,29 @@ export class PayrollService {
   ): Promise<WithdrawableAmounts> {
     const anchor = await this.getStreamAnchor(streamId);
     const effectiveNow = anchor.paused ? anchor.lastPausedTime : now;
+    // Buffer mode: accrual stops at the funded coverage window.
+    const accrualTime =
+      anchor.coveredUntil > 0n && effectiveNow > anchor.coveredUntil
+        ? anchor.coveredUntil
+        : effectiveNow;
     // `full_amount` lives on the tickets, not the anchor; the anchor caps
     // vesting at `deposited_amount` only for topup streams. Use the anchor's
     // deposited amount as the vesting base for the preview.
-    return computeWithdrawableAmount(
-      effectiveNow,
+    const { totalWithdrawable, currentlyWithdrawable } = computeWithdrawableAmount(
+      accrualTime,
       anchor.startTime,
       anchor.duration,
       anchor.pausedInterval,
       anchor.depositedAmount,
       anchor.withdrawnAmount,
     );
+    // Buffer mode: payout is capped at the funded remainder.
+    const available = anchor.depositedAmount - anchor.withdrawnAmount;
+    return {
+      totalWithdrawable,
+      currentlyWithdrawable:
+        currentlyWithdrawable <= available ? currentlyWithdrawable : available,
+    };
   }
 
   // =======================================================================
@@ -641,17 +726,12 @@ export class PayrollService {
   }
 
   /**
-   * Extract the `token_program` identifier from a payroll ticket record
-   * plaintext and load the source of the corresponding token program, as
-   * required for the dynamic token calls of `withdraw_stream_private` and
-   * `cancel_stream_private`.
+   * Load the source of the IARC22 token program identified by `tokenProgram`
+   * (a bare identifier), as required for the dynamic token calls of
+   * `withdraw_stream_private` and `cancel_stream_private`.
    */
-  private async ticketTokenImport(ticketRecord: string): Promise<Record<string, string>> {
-    const match = /token_program:\s*([a-zA-Z0-9_]+)/.exec(ticketRecord);
-    if (match === null) {
-      throw new Error("could not parse token_program from ticket record");
-    }
-    const programId = `${match[1]}.aleo`;
+  private async ticketTokenImport(tokenProgram: string): Promise<Record<string, string>> {
+    const programId = `${tokenProgram}.aleo`;
     return { [programId]: await this.loadProgramSource(programId) };
   }
 

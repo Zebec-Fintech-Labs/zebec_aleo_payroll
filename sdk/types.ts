@@ -105,6 +105,49 @@ export interface StreamTokenFee {
 /** @deprecated Use {@link StreamTokenFee} instead. */
 export type TokenPrice = StreamTokenFee;
 
+/** Leo `SenderPayrollTicket` record (ticket_type 0) — authorizes pause/resume/topup/cancel. */
+export interface SenderTicket {
+  owner: string;
+  ticketType: bigint;
+  /** Config (tenant) the stream was created under. */
+  config: string;
+  streamId: string;
+  receiver: string;
+  tokenProgram: string;
+  fullAmount: bigint;
+  isCancelable: boolean;
+  isPausable: boolean;
+  canTopup: boolean;
+  topupCount: bigint;
+}
+
+/** Leo `ReceiverPayrollTicket` record (ticket_type 1) — authorizes withdraw. */
+export interface ReceiverTicket {
+  owner: string;
+  ticketType: bigint;
+  /** Config (tenant) the stream was created under. */
+  config: string;
+  sender: string;
+  tokenProgram: string;
+  fullAmount: bigint;
+  autoWithdrawable: boolean;
+  streamId: string;
+}
+
+/** Leo `WithdrawerPayrollTicket` record (ticket_type 2) — authorizes auto-withdraw. */
+export interface WithdrawerTicket {
+  owner: string;
+  ticketType: bigint;
+  /** Config (tenant) the stream was created under; binds the withdrawer to it. */
+  config: string;
+  fullAmount: bigint;
+  streamId: string;
+  sender: string;
+  receiver: string;
+  tokenProgram: string;
+  autoWithdrawable: boolean;
+}
+
 /** `iarc22::MerkleProof` struct (16 siblings). */
 export interface MerkleProof {
   /** 16 field elements. */

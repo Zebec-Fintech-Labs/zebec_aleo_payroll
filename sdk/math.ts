@@ -6,10 +6,12 @@
 
 import type { StreamAnchor } from "./types.js";
 
+/** @deprecated Legacy TokenPrice-era constant; the on-chain program no longer
+ * uses USD price feeds. Stream fees are admin-signed via `StreamTokenFee`. */
 export const USD_PRICE_DECIMALS_SCALE = 1_000_000n;
+/** @deprecated Legacy TokenPrice-era constant; see {@link USD_PRICE_DECIMALS_SCALE}. */
 export const BPS_DENOMINATOR = 10_000n;
-/** Flat stream fee in basis points used to compute the admin-signed stream fee
- * (the on-chain program no longer has per-config fee tiers). */
+/** @deprecated Legacy TokenPrice-era constant; see {@link USD_PRICE_DECIMALS_SCALE}. */
 export const DEFAULT_FEE_BPS = 25n;
 const U64_MAX = (1n << 64n) - 1n;
 
@@ -20,7 +22,11 @@ export interface StreamFee {
   streamFee: bigint;
 }
 
-/** Mirror of `compute_stream_fee` in `main.leo`. */
+/**
+ * Mirror of the removed on-chain `compute_stream_fee` helper.
+ * @deprecated The stream fee is now an admin-signed `StreamTokenFee`
+ * (`stream_fee_amount` in microcredits); use it directly instead.
+ */
 export function computeStreamFee(
   amount: bigint,
   tokenPriceUsd: bigint,
@@ -121,4 +127,94 @@ export function computeTopupAmount(
 /** Current unix timestamp in seconds, as `bigint` (Leo `i64`). */
 export function nowSeconds(): bigint {
   return BigInt(Math.floor(Date.now() / 1000));
+}
+
+// ===========================================================================
+// Mirrors of the pure helpers in `src/main.leo` (fee / coverage / validation)
+// ===========================================================================
+
+/**
+ * Withdraw frequencies accepted by the on-chain `is_withdraw_frequency_valid`
+ * assert (see `WITHDRAW_FREQUENCIES` in `main.leo`).
+ */
+export const WITHDRAW_FREQUENCIES: readonly bigint[] = [
+  60n, // per minute
+  120n, // per 2 minutes
+  3_600n, // hourly
+  43_200n, // per half day
+  86_400n, // daily
+  604_800n, // weekly
+  1_209_600n, // bi-weekly
+  2_592_000n, // monthly
+  7_776_000n, // quarterly
+  15_552_000n, // half-yearly
+  31_536_000n, // yearly
+];
+
+/** Mirror of `is_withdraw_frequency_valid` in `main.leo`. */
+export function isWithdrawFrequencyValid(withdrawFrequency: bigint): boolean {
+  return WITHDRAW_FREQUENCIES.includes(withdrawFrequency);
+}
+
+/**
+ * Mirror of `compute_auto_withdrawal_fee` in `main.leo`: the total
+ * auto-withdrawal fee in microcredits for a stream.
+ *
+ * The on-chain program multiplies before dividing so fractional
+ * `(duration / frequency)` transactions are accounted for; this mirror keeps
+ * the same order of operations — using a different order can understate the
+ * fee and make the credit-record coverage assert fail during proving.
+ *
+ * When auto-withdrawal is disabled the caller may pass `withdrawFrequency = 0`;
+ * like the on-chain entries, a zero frequency is replaced with the daily
+ * default (the result is multiplied by zero anyway).
+ */
+export function computeAutoWithdrawalFee(
+  duration: bigint,
+  withdrawFrequency: bigint,
+  baseFee: bigint,
+  platformFee: bigint,
+): bigint {
+  const safeFrequency =
+    withdrawFrequency > 0n ? withdrawFrequency : DEFAULT_WITHDRAW_FREQUENCY;
+  if (!isWithdrawFrequencyValid(safeFrequency)) {
+    throw new Error(`invalid withdraw frequency: ${withdrawFrequency}`);
+  }
+  if (duration <= 0n) {
+    throw new Error("duration must be positive");
+  }
+  return platformFee + (duration * baseFee) / safeFrequency;
+}
+
+/** Daily fallback used by the on-chain program to guard division by zero. */
+export const DEFAULT_WITHDRAW_FREQUENCY = 86_400n;
+
+/** Fee burned by `credits.aleo::split` (deducted from the change record). */
+export const SPLIT_FEE = 10_000n;
+
+/**
+ * Mirror of `compute_buffer_coverage` in `main.leo`: the buffer-mode
+ * `covered_until` timestamp of a freshly created stream (`0` when top-up mode
+ * is disabled). `depositAmount` must be `<= fullAmount`, mirroring the
+ * on-chain `assert_create_params`.
+ */
+export function computeBufferCoverage(
+  depositAmount: bigint,
+  duration: bigint,
+  fullAmount: bigint,
+  startTime: bigint,
+  canTopup: boolean,
+): bigint {
+  if (!canTopup) return 0n;
+  if (fullAmount <= 0n) {
+    throw new Error("full amount must be positive");
+  }
+  if (duration <= 0n) {
+    throw new Error("duration must be positive");
+  }
+  if (depositAmount > fullAmount) {
+    throw new Error("initial buffer amount cannot exceed the stream amount");
+  }
+  const bufferSecs = (depositAmount * duration) / fullAmount;
+  return startTime + bufferSecs;
 }

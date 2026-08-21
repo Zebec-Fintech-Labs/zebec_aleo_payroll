@@ -886,9 +886,9 @@ program test_zebec_payroll_v6.aleo {
         let self_address: address = std::ctx::addr();
 
         // Check: caller is the payroll sender.
+        assert(payroll.initialized);
         assert(caller == payroll.sender);
         // Check: stream was created with top-up enabled.
-        assert(payroll.initialized);
         assert(payroll.can_topup);
         assert(stream_anchor.initialized);
         assert(stream_anchor.stream_id == payroll.stream_id);
@@ -963,16 +963,15 @@ program test_zebec_payroll_v6.aleo {
     // own public balance; no allowance required).
     fn withdraw_stream_public(
         payroll: Payroll,
-        config: Config,
         stream_anchor: StreamAnchor,
         now: i64,
     ) -> Final {
         let caller: address = std::ctx::caller();
 
         // Check: caller is the config's withdrawer.
-        assert(caller == config.withdrawer);
-        assert(payroll.stream_id == stream_anchor.stream_id);
         assert(payroll.initialized);
+        assert(caller == payroll.receiver);
+        assert(payroll.stream_id == stream_anchor.stream_id);
         // Check: Stream has started
         assert(stream_anchor.initialized);
         assert(stream_anchor.start_time <= now);
