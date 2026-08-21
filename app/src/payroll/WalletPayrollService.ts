@@ -12,11 +12,11 @@ import type { AleoDeployment } from "@provablehq/aleo-wallet-standard";
 
 import { whitelistKey } from "../../../sdk/hashing.ts";
 import {
-  computeStreamFee,
+  computeAutoWithdrawalFee,
   computeTopupAmount,
   computeWithdrawableAmount,
-  DEFAULT_FEE_BPS,
   nowSeconds,
+  SPLIT_FEE,
   type WithdrawableAmounts,
 } from "../../../sdk/math.ts";
 import {
@@ -27,6 +27,7 @@ import {
   parseBoolLiteral,
   parsePayroll,
   parsePayrollConfig,
+  parseSenderTicket,
   parseStreamAnchor,
   payrollToPlaintext,
   streamAnchorToPlaintext,
@@ -43,7 +44,6 @@ import type {
 } from "../../../sdk/types.ts";
 
 import {
-  ALEO_PRICE_USD,
   CONFIG_NAME,
   CREDITS_PROGRAM_ID,
   DEFAULT_FEE,
@@ -51,9 +51,9 @@ import {
   FREEZE_LIST_URL,
   HOST,
   PROGRAM_ID,
+  STREAM_FEE_AMOUNT,
   TOKEN_PROGRAM,
   TOKEN_PROGRAM_ID,
-  TOKEN_PRICE_USD,
 } from "../config.ts";
 
 /** Subset of the `useWallet()` context the service needs. */
@@ -162,37 +162,33 @@ export class WalletPayrollService {
     adminKey: string,
     fee: number = DEFAULT_FEE,
   ): Promise<string> {
-    const SPLIT_FEE = 10_000n;
     const depositAmount = params.canTopup ? params.initialBufferAmount : params.amount;
     const config = await this.getConfigInput();
-    
-    // Compute the stream fee from USD value with the flat fee basis points.
-    const { streamFee } = computeStreamFee(
-      params.amount,
-      TOKEN_PRICE_USD,
-      ALEO_PRICE_USD,
-      DEFAULT_FEE_BPS,
-    );
-    
-    // Build the admin-signed stream fee attestation.
+
+    // Build the admin-signed stream fee attestation from the flat fee amount.
     const tokenFee: StreamTokenFee = {
       config: CONFIG_NAME,
       streamToken: TOKEN_PROGRAM,
-      streamFeeAmount: streamFee,
+      streamFeeAmount: STREAM_FEE_AMOUNT,
       expiry: nowSeconds() + 3600n,
       nonce: randomField(),
     };
     const feeSignature = signStreamTokenFee(adminKey, tokenFee);
-    
+
     // The credit record must cover the auto-withdrawal fee, the stream fee,
-    // and the 10k microcredit burn from credits.aleo::split.
-    let autoWithdrawalFee = 0n;
-    if (params.autoWithdrawable) {
-      autoWithdrawalFee =
-        config.platformFee + (params.duration / params.withdrawFrequency) * config.baseFee;
-    }
-    console.log("auto-withdrawal fee:", autoWithdrawalFee, "stream fee:", streamFee, "split burn:", SPLIT_FEE);
-    const creditRecord = await this.findCredits(autoWithdrawalFee + streamFee + SPLIT_FEE);
+    // and the 10k microcredit burn from credits.aleo::split. The fee mirror
+    // multiplies before dividing, exactly like the on-chain helper — a lower
+    // estimate would fail the coverage assert during proving.
+    const autoWithdrawalFee = params.autoWithdrawable
+      ? computeAutoWithdrawalFee(
+          params.duration,
+          params.withdrawFrequency,
+          config.baseFee,
+          config.platformFee,
+        )
+      : 0n;
+    console.log("auto-withdrawal fee:", autoWithdrawalFee, "stream fee:", STREAM_FEE_AMOUNT, "split burn:", SPLIT_FEE);
+    const creditRecord = await this.findCredits(autoWithdrawalFee + STREAM_FEE_AMOUNT + SPLIT_FEE);
     console.log("credit record:", creditRecord);
     const tokenRecord = await this.findToken(depositAmount);
     console.log("token record:", tokenRecord);
@@ -278,10 +274,7 @@ export class WalletPayrollService {
     const now = nowSeconds();
     const ticket = await this.findTicket("SenderPayrollTicket", streamId);
     const anchor = await this.getStreamAnchor(streamId);
-    const fullAmount = recordAmount(ticket, "full_amount");
-    if (fullAmount === undefined) {
-      throw new Error("could not parse full_amount from the ticket record");
-    }
+    const { fullAmount } = parseSenderTicket(ticket);
     const { topupAmount } = computeTopupAmount(anchor, fullAmount, now, extra);
     console.log("topup amount (debt + extra):", topupAmount);
     const tokenRecord = await this.findToken(topupAmount);
@@ -310,25 +303,17 @@ export class WalletPayrollService {
     fee: number = DEFAULT_FEE,
   ): Promise<string> {
     const config = await this.getConfigInput();
-    
-    // Compute the stream fee from USD value with the flat fee basis points.
-    const { streamFee } = computeStreamFee(
-      params.amount,
-      TOKEN_PRICE_USD,
-      ALEO_PRICE_USD,
-      DEFAULT_FEE_BPS,
-    );
-    
-    // Build the admin-signed stream fee attestation.
+
+    // Build the admin-signed stream fee attestation from the flat fee amount.
     const tokenFee: StreamTokenFee = {
       config: CONFIG_NAME,
       streamToken: TOKEN_PROGRAM,
-      streamFeeAmount: streamFee,
+      streamFeeAmount: STREAM_FEE_AMOUNT,
       expiry: nowSeconds() + 3600n,
       nonce: randomField(),
     };
     const feeSignature = signStreamTokenFee(adminKey, tokenFee);
-    
+
     const inputs = [
       createStreamParamsToPlaintext(params),
       identLiteral(TOKEN_PROGRAM),
@@ -377,6 +362,59 @@ export class WalletPayrollService {
       `${now}i64`,
     ];
     return this.execute("withdraw_stream_public", inputs, fee, DYNAMIC_DISPATCH_IMPORTS);
+  }
+
+  /**
+   * Execute `topup_stream_public`: pay the accrued debt of a buffer-mode
+   * public stream plus `extra` pre-paid coverage. The connected wallet must
+   * be the payroll's sender and must have approved this program on the token
+   * (the deposit is pulled from the sender's public balance via
+   * `IARC22::transfer_from_public` — see `WalletArc22Service.approve`).
+   * Payroll + anchor resolved automatically.
+   */
+  async topupStreamPublic(
+    streamId: string | bigint,
+    extra: bigint,
+    fee: number = DEFAULT_FEE,
+  ): Promise<string> {
+    const now = nowSeconds();
+    const payroll = await this.getPayroll(streamId);
+    const anchor = await this.getStreamAnchor(streamId);
+    // Fail fast when there is nothing to pay: the on-chain entry asserts
+    // `debt_amount + extra > 0` with the same pause-aware debt math.
+    const { topupAmount } = computeTopupAmount(anchor, payroll.fullAmount, now, extra);
+    if (topupAmount <= 0n) {
+      throw new Error("top-up amount is zero: no accrued debt and no extra pre-payment");
+    }
+    const inputs = [
+      payrollToPlaintext(payroll),
+      streamAnchorToPlaintext(anchor),
+      `${extra}u128`,
+      `${now}i64`,
+    ];
+    return this.execute("topup_stream_public", inputs, fee, DYNAMIC_DISPATCH_IMPORTS);
+  }
+
+  /**
+   * Execute `withdraw_stream_auto_public`: pay out the receiver's accrued
+   * amount on behalf of the receiver. Withdrawer only — the connected wallet
+   * must be the config's withdrawer. Payroll + anchor resolved automatically.
+   */
+  async withdrawAutoPublic(
+    streamId: string | bigint,
+    config: Config,
+    fee: number = DEFAULT_FEE,
+  ): Promise<string> {
+    const now = nowSeconds();
+    const payroll = await this.getPayroll(streamId);
+    const anchor = await this.getStreamAnchor(streamId);
+    const inputs = [
+      payrollToPlaintext(payroll),
+      configToPlaintext(config),
+      streamAnchorToPlaintext(anchor),
+      `${now}i64`,
+    ];
+    return this.execute("withdraw_stream_auto_public", inputs, fee, DYNAMIC_DISPATCH_IMPORTS);
   }
 
   // =======================================================================
@@ -513,7 +551,10 @@ export class WalletPayrollService {
 
   /**
    * Preview the withdrawable amounts of a stream at `now` by combining the
-   * on-chain anchor with the off-chain vesting math.
+   * on-chain anchor with the off-chain vesting math. Mirrors the payout logic
+   * of the withdraw transitions: in buffer mode (`covered_until > 0`) accrual
+   * is capped at the funded coverage window and the payout at the funded
+   * remainder.
    */
   async getWithdrawableAmounts(
     streamId: string | bigint,
@@ -521,14 +562,26 @@ export class WalletPayrollService {
   ): Promise<WithdrawableAmounts> {
     const anchor = await this.getStreamAnchor(streamId);
     const effectiveNow = anchor.paused ? anchor.lastPausedTime : now;
-    return computeWithdrawableAmount(
-      effectiveNow,
+    // Buffer mode: accrual stops at the funded coverage window.
+    const accrualTime =
+      anchor.coveredUntil > 0n && effectiveNow > anchor.coveredUntil
+        ? anchor.coveredUntil
+        : effectiveNow;
+    const { totalWithdrawable, currentlyWithdrawable } = computeWithdrawableAmount(
+      accrualTime,
       anchor.startTime,
       anchor.duration,
       anchor.pausedInterval,
       anchor.depositedAmount,
       anchor.withdrawnAmount,
     );
+    // Buffer mode: payout is capped at the funded remainder.
+    const available = anchor.depositedAmount - anchor.withdrawnAmount;
+    return {
+      totalWithdrawable,
+      currentlyWithdrawable:
+        currentlyWithdrawable <= available ? currentlyWithdrawable : available,
+    };
   }
 
   // =======================================================================
@@ -678,7 +731,7 @@ export class WalletPayrollService {
   // =======================================================================
 
   /** Read the on-chain payroll config and shape it as the `Config` input. */
-  private async getConfigInput(): Promise<Config> {
+  async getConfigInput(): Promise<Config> {
     const chainConfig = await this.getPayrollConfig(CONFIG_NAME);
     return {
       configName: CONFIG_NAME,

@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
-import type { PayrollConfig } from "../../../sdk/types.ts";
+import type {
+  Payroll,
+  PayrollConfig,
+  StreamAnchor,
+} from "../../../sdk/types.ts";
+import type { WithdrawableAmounts } from "../../../sdk/math.ts";
 import { CONFIG_NAME, DEFAULT_FEE, TOKEN_PROGRAM } from "../config.ts";
 import type { UsePayroll } from "../hooks/usePayroll.ts";
+import { loadKnownStreamIds, addKnownStreamId } from "./publicStreamStore.ts";
+import { fieldLiteral } from "../../../sdk/plaintext.ts";
 import { parseBig, parseFee, requirePrefix } from "./form.ts";
 
 interface ConfigState {
@@ -9,11 +16,40 @@ interface ConfigState {
   whitelisted?: boolean;
 }
 
+/** A stream the wallet holds a WithdrawerPayrollTicket for (private auto-withdraw). */
+interface WithdrawerRow {
+  streamId: string;
+  anchor?: StreamAnchor;
+  withdrawable?: WithdrawableAmounts;
+  note?: string;
+}
+
+/** A known public stream (public auto-withdraw). */
+interface PublicWithdrawRow {
+  streamId: string;
+  payroll?: Payroll;
+  anchor?: StreamAnchor;
+  withdrawable?: WithdrawableAmounts;
+  note?: string;
+}
+
+function anchorStatus(anchor: StreamAnchor): string {
+  if (anchor.canceled) return "canceled";
+  if (anchor.paused) return "paused";
+  return "active";
+}
+
 export default function AdminPage({ payroll }: { payroll: UsePayroll }) {
-  const { busy, runTx, service } = payroll;
+  const { busy, runTx, service, address } = payroll;
 
   const [state, setState] = useState<ConfigState>({});
   const [readNote, setReadNote] = useState<string | null>(null);
+
+  // Auto-withdraw state.
+  const [withdrawerRows, setWithdrawerRows] = useState<WithdrawerRow[]>([]);
+  const [publicRows, setPublicRows] = useState<PublicWithdrawRow[]>([]);
+  const [withdrawNote, setWithdrawNote] = useState<string | null>(null);
+  const [manualStreamId, setManualStreamId] = useState("");
 
   const refresh = useCallback(async () => {
     if (service === null) return;
@@ -31,6 +67,101 @@ export default function AdminPage({ payroll }: { payroll: UsePayroll }) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  /** Load the withdrawer's private tickets and the known public streams. */
+  const refreshWithdrawLists = useCallback(async () => {
+    if (service === null || address === null) return;
+    setWithdrawNote(null);
+    // Private: streams the wallet holds a WithdrawerPayrollTicket for.
+    try {
+      const tickets = await service.listMyTickets();
+      const rows: WithdrawerRow[] = [];
+      for (const ticket of tickets.filter((t) => t.kind === "WithdrawerPayrollTicket")) {
+        try {
+          const anchor = await service.getStreamAnchor(ticket.streamId);
+          let withdrawable: WithdrawableAmounts | undefined;
+          try {
+            withdrawable = await service.getWithdrawableAmounts(ticket.streamId);
+          } catch {
+            withdrawable = undefined;
+          }
+          rows.push({
+            streamId: ticket.streamId,
+            anchor,
+            ...(withdrawable !== undefined ? { withdrawable } : {}),
+          });
+        } catch {
+          rows.push({ streamId: ticket.streamId, note: "no on-chain anchor" });
+        }
+      }
+      setWithdrawerRows(rows);
+    } catch (e) {
+      console.error("List withdrawer tickets error:", e);
+      setWithdrawNote(e instanceof Error ? e.message : String(e));
+    }
+    // Public: known stream ids from the shared store.
+    const ids = loadKnownStreamIds(address);
+    const prows: PublicWithdrawRow[] = [];
+    for (const streamId of ids) {
+      try {
+        const payrollInfo = await service.getPayroll(streamId);
+        const anchor = await service.getStreamAnchor(streamId);
+        let withdrawable: WithdrawableAmounts | undefined;
+        try {
+          withdrawable = await service.getWithdrawableAmounts(streamId);
+        } catch {
+          withdrawable = undefined;
+        }
+        prows.push({
+          streamId,
+          payroll: payrollInfo,
+          anchor,
+          ...(withdrawable !== undefined ? { withdrawable } : {}),
+        });
+      } catch {
+        prows.push({ streamId, note: "no on-chain payroll/anchor found" });
+      }
+    }
+    setPublicRows(prows);
+  }, [service, address]);
+
+  useEffect(() => {
+    void refreshWithdrawLists();
+  }, [refreshWithdrawLists]);
+
+  const onAddManualStream = (e: React.FormEvent) => {
+    e.preventDefault();
+    setWithdrawNote(null);
+    if (address === null) return;
+    let id: string;
+    try {
+      id = fieldLiteral(manualStreamId);
+    } catch (err) {
+      setWithdrawNote(err instanceof Error ? err.message : String(err));
+      return;
+    }
+    addKnownStreamId(address, id);
+    setManualStreamId("");
+    void refreshWithdrawLists();
+  };
+
+  const onAutoWithdrawPrivate = async (streamId: string) => {
+    await runTx(async (svc) => {
+      const config = await svc.getConfigInput();
+      const txId = await svc.withdrawAuto(streamId, config);
+      await svc.waitForConfirmation(txId);
+    });
+    await refreshWithdrawLists();
+  };
+
+  const onAutoWithdrawPublic = async (streamId: string) => {
+    await runTx(async (svc) => {
+      const config = await svc.getConfigInput();
+      const txId = await svc.withdrawAutoPublic(streamId, config);
+      await svc.waitForConfirmation(txId);
+    });
+    await refreshWithdrawLists();
+  };
 
   return (
     <>
@@ -88,6 +219,144 @@ export default function AdminPage({ payroll }: { payroll: UsePayroll }) {
         }
       />
       <WhitelistForm busy={busy} runTx={runTx} onDone={refresh} />
+
+      <section className="card">
+        <h2>Auto-withdraw (private streams)</h2>
+        <p className="muted" style={{ fontSize: "0.85rem" }}>
+          Streams this wallet holds a withdrawer ticket for. The connected wallet
+          must be the config's withdrawer.
+        </p>
+        {withdrawerRows.length === 0 ? (
+          <p className="muted">No withdrawer tickets found in this wallet.</p>
+        ) : (
+          <table className="streams">
+            <thead>
+              <tr>
+                <th>Stream id</th>
+                <th>Status</th>
+                <th>Withdrawable now</th>
+                <th>Withdrawn / Deposited</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {withdrawerRows.map((s) => (
+                <tr key={s.streamId}>
+                  <td>{s.streamId}field</td>
+                  <td>{s.anchor !== undefined ? anchorStatus(s.anchor) : (s.note ?? "?")}</td>
+                  <td>
+                    {s.withdrawable !== undefined
+                      ? s.withdrawable.currentlyWithdrawable.toString()
+                      : "—"}
+                  </td>
+                  <td>
+                    {s.anchor !== undefined
+                      ? `${s.anchor.withdrawnAmount} / ${s.anchor.depositedAmount}`
+                      : "—"}
+                  </td>
+                  <td>
+                    <button
+                      className="action"
+                      onClick={() => void onAutoWithdrawPrivate(s.streamId)}
+                      disabled={
+                        busy ||
+                        s.anchor === undefined ||
+                        s.anchor.canceled ||
+                        s.withdrawable === undefined ||
+                        s.withdrawable.currentlyWithdrawable <= 0n
+                      }
+                    >
+                      Auto-withdraw
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <section className="card">
+        <h2>Auto-withdraw (public streams)</h2>
+        <p className="muted" style={{ fontSize: "0.85rem" }}>
+          Known public streams (shared with the employer/employee pages). The
+          connected wallet must be the config's withdrawer.
+        </p>
+        <form className="row-actions" style={{ marginBottom: "0.75rem" }} onSubmit={onAddManualStream}>
+          <input
+            value={manualStreamId}
+            onChange={(e) => setManualStreamId(e.target.value)}
+            placeholder="stream id (e.g. 42field)"
+            disabled={busy}
+          />
+          <button
+            className="action secondary"
+            type="submit"
+            disabled={busy || manualStreamId.trim() === ""}
+          >
+            Add stream
+          </button>
+          <button
+            className="action secondary"
+            type="button"
+            onClick={() => void refreshWithdrawLists()}
+            disabled={busy}
+          >
+            Refresh
+          </button>
+        </form>
+        {withdrawNote !== null && <p className="form-error">{withdrawNote}</p>}
+        {publicRows.length === 0 ? (
+          <p className="muted">
+            No known public streams yet. Add a stream id above to manage it here.
+          </p>
+        ) : (
+          <table className="streams">
+            <thead>
+              <tr>
+                <th>Stream id</th>
+                <th>Status</th>
+                <th>Withdrawable now</th>
+                <th>Withdrawn / Deposited</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {publicRows.map((s) => (
+                <tr key={s.streamId}>
+                  <td>{s.streamId}</td>
+                  <td>{s.anchor !== undefined ? anchorStatus(s.anchor) : (s.note ?? "?")}</td>
+                  <td>
+                    {s.withdrawable !== undefined
+                      ? s.withdrawable.currentlyWithdrawable.toString()
+                      : "—"}
+                  </td>
+                  <td>
+                    {s.anchor !== undefined
+                      ? `${s.anchor.withdrawnAmount} / ${s.anchor.depositedAmount}`
+                      : "—"}
+                  </td>
+                  <td>
+                    <button
+                      className="action"
+                      onClick={() => void onAutoWithdrawPublic(s.streamId)}
+                      disabled={
+                        busy ||
+                        s.anchor === undefined ||
+                        s.anchor.canceled ||
+                        s.withdrawable === undefined ||
+                        s.withdrawable.currentlyWithdrawable <= 0n
+                      }
+                    >
+                      Auto-withdraw
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
     </>
   );
 }
