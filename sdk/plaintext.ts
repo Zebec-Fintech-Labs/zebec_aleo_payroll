@@ -147,6 +147,16 @@ export function merkleProofsToPlaintext(proofs: [MerkleProof, MerkleProof]): str
 // Parsing
 // =========================================================================
 
+/**
+ * Strip an optional trailing visibility suffix (`.private`, `.public`,
+ * `.constant`) from a plaintext member value. Wallet-decrypted record
+ * plaintexts carry these suffixes on every member (e.g. `1000u64.private`),
+ * while mapping queries return bare literals; stripping here normalizes both.
+ */
+export function stripVisibilitySuffix(value: string): string {
+  return value.replace(/\.(?:private|public|constant)$/i, "").trim();
+}
+
 /** Split a struct body into top-level `name: value` members. */
 export function parseStructMembers(plaintext: string): Map<string, string> {
   const text = plaintext.trim();
@@ -172,7 +182,7 @@ export function parseStructMembers(plaintext: string): Map<string, string> {
   for (const part of parts) {
     const colon = part.indexOf(":");
     if (colon < 0) throw new Error(`malformed struct member: ${part}`);
-    members.set(part.slice(0, colon).trim(), part.slice(colon + 1).trim());
+    members.set(part.slice(0, colon).trim(), stripVisibilitySuffix(part.slice(colon + 1)));
   }
   return members;
 }
@@ -185,14 +195,16 @@ function requireMember(members: Map<string, string>, name: string): string {
 
 /** Parse an integer literal (`"3600u64"`, `"-5i64"`, ...) to `bigint`. */
 export function parseIntLiteral(value: string): bigint {
-  const m = /^(-?\d+)(u8|u16|u32|u64|u128|i8|i16|i32|i64|i128)$/.exec(value.trim());
+  const m = /^(-?\d+)(u8|u16|u32|u64|u128|i8|i16|i32|i64|i128)$/.exec(
+    stripVisibilitySuffix(value),
+  );
   if (!m) throw new Error(`not an integer literal: ${value}`);
   return BigInt(m[1]!);
 }
 
 /** Parse a boolean literal (`"true"` / `"false"`). */
 export function parseBoolLiteral(value: string): boolean {
-  const v = value.trim();
+  const v = stripVisibilitySuffix(value);
   if (v === "true") return true;
   if (v === "false") return false;
   throw new Error(`not a boolean literal: ${value}`);
@@ -200,12 +212,12 @@ export function parseBoolLiteral(value: string): boolean {
 
 /** Normalize a parsed field literal to canonical form (`"123field"`). */
 export function parseFieldLiteral(value: string): string {
-  return fieldLiteral(value.trim());
+  return fieldLiteral(stripVisibilitySuffix(value));
 }
 
 /** Parse an identifier literal (`"'my_token'"`) to its bare form (`"my_token"`). */
 export function parseIdentLiteral(value: string): string {
-  const v = value.trim();
+  const v = stripVisibilitySuffix(value);
   const m = /^'([a-z][a-z0-9_]{0,30})'$/.exec(v);
   if (!m) throw new Error(`not an identifier literal: ${value}`);
   return m[1]!;
@@ -354,3 +366,6 @@ function requireTicketMembers(
 }
 
 
+
+
+// watch-test
