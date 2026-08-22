@@ -1,5 +1,5 @@
 /**
- * TypeScript mirrors of the Leo structs in `test_zebec_payroll_v6.aleo` (see
+ * TypeScript mirrors of the Leo structs in `test_zebec_payroll_v7.aleo` (see
  * `src/main.leo` at the repository root) plus SDK option types.
  *
  * Conventions used across the SDK:
@@ -159,12 +159,12 @@ export interface MerkleProof {
 export interface PayrollClientOptions {
   /** API host. Defaults to the testnet explorer API. */
   host?: string;
-  /** Program id. Defaults to `test_zebec_payroll_v6.aleo`. */
+  /** Program id. Defaults to `test_zebec_payroll_v7.aleo`. */
   programId?: string;
   /** Private key of the transacting account (`APrivateKey1...`). */
   privateKey?: string;
   /**
-   * Compiled program source (`build/test_zebec_payroll_v6/test_zebec_payroll_v6.aleo`). When
+   * Compiled program source (`build/test_zebec_payroll_v7/test_zebec_payroll_v7.aleo`). When
    * provided, it is used for executions instead of fetching the (deployed)
    * program from the network — useful before the program is deployed.
    */
