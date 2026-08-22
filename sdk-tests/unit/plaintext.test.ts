@@ -11,8 +11,11 @@ import {
   merkleProofsToPlaintext,
   parsePayroll,
   parsePayrollConfig,
+  parseReceiverTicket,
+  parseSenderTicket,
   parseStreamAnchor,
   parseStructMembers,
+  parseWithdrawerTicket,
   payrollToPlaintext,
   streamAnchorToPlaintext,
   streamTokenFeeToPlaintext,
@@ -217,5 +220,77 @@ describe("parsers", () => {
       initialized: true
     }`;
     assert.deepEqual(parsePayroll(value), samplePayroll());
+  });
+});
+
+describe("ticket parsers", () => {
+  const senderTicketPlaintext = `{
+    owner: ${RECEIVER},
+    ticket_type: 0u8,
+    config: 7field,
+    stream_id: 42field,
+    receiver: ${ADMIN},
+    token_program: 'token',
+    full_amount: 1000000u128,
+    is_cancelable: true,
+    is_pausable: false,
+    can_topup: true,
+    topup_count: 1u64
+  }`;
+
+  const receiverTicketPlaintext = `{
+    owner: ${RECEIVER},
+    ticket_type: 1u8,
+    config: 7field,
+    sender: ${ADMIN},
+    token_program: 'token',
+    full_amount: 1000000u128,
+    auto_withdrawable: true,
+    stream_id: 42field
+  }`;
+
+  const withdrawerTicketPlaintext = `{
+    owner: ${ADMIN},
+    ticket_type: 2u8,
+    config: 7field,
+    full_amount: 1000000u128,
+    stream_id: 42field,
+    sender: ${RECEIVER},
+    receiver: ${ADMIN},
+    token_program: 'token',
+    auto_withdrawable: true
+  }`;
+
+  it("parses a sender ticket", () => {
+    const t = parseSenderTicket(senderTicketPlaintext);
+    assert.equal(t.ticketType, 0n);
+    assert.equal(t.streamId, "42field");
+    assert.equal(t.config, "7field");
+    assert.equal(t.tokenProgram, "token");
+    assert.equal(t.fullAmount, 1_000_000n);
+    assert.equal(t.canTopup, true);
+    assert.equal(t.topupCount, 1n);
+  });
+
+  it("parses a receiver ticket", () => {
+    const t = parseReceiverTicket(receiverTicketPlaintext);
+    assert.equal(t.ticketType, 1n);
+    assert.equal(t.sender, ADMIN);
+    assert.equal(t.autoWithdrawable, true);
+    assert.equal(t.streamId, "42field");
+  });
+
+  it("parses a withdrawer ticket", () => {
+    const t = parseWithdrawerTicket(withdrawerTicketPlaintext);
+    assert.equal(t.ticketType, 2n);
+    assert.equal(t.config, "7field");
+    assert.equal(t.receiver, ADMIN);
+    assert.equal(t.autoWithdrawable, true);
+  });
+
+  it("rejects the wrong ticket type", () => {
+    assert.throws(() => parseSenderTicket(receiverTicketPlaintext));
+    assert.throws(() => parseReceiverTicket(withdrawerTicketPlaintext));
+    assert.throws(() => parseWithdrawerTicket(senderTicketPlaintext));
   });
 });

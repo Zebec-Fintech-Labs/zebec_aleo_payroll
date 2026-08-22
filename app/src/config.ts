@@ -1,7 +1,7 @@
 import { configNameToField } from "../../sdk/hashing.ts";
 
 /** Payroll program on testnet. */
-export const PROGRAM_ID = "test_zebec_payroll_v6.aleo";
+export const PROGRAM_ID = "test_zebec_payroll_v7.aleo";
 /** Testnet explorer API host (mapping reads, tx confirmation fallback). */
 export const HOST = "https://api.explorer.provable.com/v1";
 /** Freeze list of the IARC22 token program (compliance proofs). */
@@ -31,16 +31,12 @@ export const DYNAMIC_DISPATCH_IMPORTS = [
   TOKEN_PROGRAM_ID,
 ];
 
-/** Fixed price attestation values (USD, 6 decimals), as in scripts/payroll.ts. */
-export const TOKEN_PRICE_USD = 1_000_000n; // $1.00
-export const ALEO_PRICE_USD = 200_000n; // $0.20
+/**
+ * Stream fee charged per create transaction, in microcredits. Embedded in the
+ * admin-signed `StreamTokenFee` attestation (the on-chain program verifies the
+ * signature and consumes the nonce; it has no USD price logic).
+ */
+export const STREAM_FEE_AMOUNT = 100_000n;
 
 /** Default transaction fee in microcredits (0.1 ALEO). */
 export const DEFAULT_FEE = 100_000;
-
-/**
- * Flat stream fee in basis points used to compute the admin-signed stream fee.
- * The on-chain program no longer has per-config fee tiers, so a single default
- * is used (the admin signs the resulting flat fee for every stream).
- */
-export const DEFAULT_FEE_BPS = 25n;

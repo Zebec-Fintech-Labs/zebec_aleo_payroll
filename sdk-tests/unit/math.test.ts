@@ -1,7 +1,14 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "mocha";
 
-import { computeStreamFee, computeTopupAmount, computeWithdrawableAmount } from "../../sdk/math.js";
+import {
+  computeAutoWithdrawalFee,
+  computeBufferCoverage,
+  computeStreamFee,
+  computeTopupAmount,
+  computeWithdrawableAmount,
+  isWithdrawFrequencyValid,
+} from "../../sdk/math.js";
 
 describe("computeStreamFee", () => {
   it("computes usd value and fee like the on-chain function", () => {
@@ -119,5 +126,63 @@ describe("computeTopupAmount", () => {
   it("throws on non-positive duration or full amount", () => {
     assert.throws(() => computeTopupAmount({ ...anchor, duration: 0n }, FULL, 1_000n, 0n));
     assert.throws(() => computeTopupAmount(anchor, 0n, 1_000n, 0n));
+  });
+});
+
+describe("computeAutoWithdrawalFee", () => {
+  it("multiplies before dividing like the on-chain helper", () => {
+    // duration=90, frequency=60, base=100: floor(9000/60)=150 + platform 50.
+    assert.equal(computeAutoWithdrawalFee(90n, 60n, 100n, 50n), 200n);
+  });
+
+  it("accounts for fractional transactions (unlike divide-first)", () => {
+    // duration=61, frequency=60, base=60: multiply-first gives floor(3660/60)=61,
+    // a divide-first implementation would give floor(61/60)*60 = 60.
+    assert.equal(computeAutoWithdrawalFee(61n, 60n, 60n, 0n), 61n);
+  });
+
+  it("guards a zero frequency with the daily default", () => {
+    assert.equal(computeAutoWithdrawalFee(86_400n, 0n, 1n, 7n), 8n);
+  });
+
+  it("rejects frequencies outside the on-chain whitelist", () => {
+    assert.throws(() => computeAutoWithdrawalFee(100n, 61n, 1n, 0n));
+  });
+
+  it("throws on non-positive duration", () => {
+    assert.throws(() => computeAutoWithdrawalFee(0n, 60n, 1n, 0n));
+  });
+});
+
+describe("isWithdrawFrequencyValid", () => {
+  it("accepts every on-chain WITHDRAW_FREQUENCIES entry", () => {
+    for (const f of [60n, 120n, 3_600n, 43_200n, 86_400n, 604_800n, 1_209_600n, 2_592_000n, 7_776_000n, 15_552_000n, 31_536_000n]) {
+      assert.equal(isWithdrawFrequencyValid(f), true, `${f}`);
+    }
+  });
+
+  it("rejects other values", () => {
+    assert.equal(isWithdrawFrequencyValid(61n), false);
+    assert.equal(isWithdrawFrequencyValid(0n), false);
+  });
+});
+
+describe("computeBufferCoverage", () => {
+  it("returns 0 when top-up mode is disabled", () => {
+    assert.equal(computeBufferCoverage(5_000n, 100n, 10_000n, 1_000n, false), 0n);
+  });
+
+  it("covers the proportional buffer window", () => {
+    // Half the amount up front covers half the duration.
+    assert.equal(computeBufferCoverage(5_000n, 100n, 10_000n, 1_000n, true), 1_050n);
+  });
+
+  it("truncates like integer division", () => {
+    // 1/3 of the amount over a 100s duration -> 33 covered seconds.
+    assert.equal(computeBufferCoverage(3_333n, 100n, 10_000n, 1_000n, true), 1_033n);
+  });
+
+  it("rejects a buffer larger than the stream amount", () => {
+    assert.throws(() => computeBufferCoverage(10_001n, 100n, 10_000n, 1_000n, true));
   });
 });

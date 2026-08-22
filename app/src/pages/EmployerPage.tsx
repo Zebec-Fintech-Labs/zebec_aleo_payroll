@@ -1,16 +1,21 @@
 import { useCallback, useEffect, useState } from "react";
+import { computeTopupAmount, nowSeconds } from "../../../sdk/math.ts";
 import type { CreateStreamParams, StreamAnchor } from "../../../sdk/types.ts";
 import { DEFAULT_FEE } from "../config.ts";
 import type { UsePayroll } from "../hooks/usePayroll.ts";
 import { loadKnownStreamIds, addKnownStreamId } from "./publicStreamStore.ts";
 import { WalletArc22Service } from "../payroll/WalletArc22Service.ts";
 import { TOKEN_PROGRAM, TOKEN_PROGRAM_ID } from "../config.ts";
-import { fieldLiteral } from "../../../sdk/plaintext.ts";
+import { fieldLiteral, parseSenderTicket } from "../../../sdk/plaintext.ts";
 import { parseBig, parseFee, randomField, requirePrefix } from "./form.ts";
 
 interface OutgoingStream {
   streamId: string;
   anchor?: StreamAnchor;
+  /** From the sender ticket: whether the stream was created with top-up enabled. */
+  canTopup?: boolean;
+  /** From the sender ticket: the stream's full amount (top-up quote base). */
+  fullAmount?: bigint;
   note?: string;
 }
 
@@ -67,6 +72,14 @@ export default function EmployerPage({ payroll }: { payroll: UsePayroll }) {
   const [allowanceNote, setAllowanceNote] = useState<string | null>(null);
   const [manualStreamId, setManualStreamId] = useState("");
 
+  // Top-up form state (shared by the private and public cards).
+  const [topupExtra, setTopupExtra] = useState("0");
+  const [topupFee, setTopupFee] = useState(String(DEFAULT_FEE));
+  const [selectedPrivateTopup, setSelectedPrivateTopup] = useState("");
+  const [selectedPublicTopup, setSelectedPublicTopup] = useState("");
+  const [topupError, setTopupError] = useState<string | null>(null);
+  const [topupResult, setTopupResult] = useState<string | null>(null);
+
   const refreshStreams = useCallback(async () => {
     if (service === null) return;
     setListNote(null);
@@ -75,10 +88,21 @@ export default function EmployerPage({ payroll }: { payroll: UsePayroll }) {
       const senderTickets = tickets.filter((t) => t.kind === "SenderPayrollTicket");
       const rows: OutgoingStream[] = [];
       for (const ticket of senderTickets) {
+        let canTopup: boolean | undefined;
+        let fullAmount: bigint | undefined;
+        try {
+          const parsed = parseSenderTicket(ticket.plaintext);
+          canTopup = parsed.canTopup;
+          fullAmount = parsed.fullAmount;
+        } catch {
+          // Unparseable ticket — still listed, top-up just stays unavailable.
+        }
         try {
           rows.push({
             streamId: ticket.streamId,
             anchor: await service.getStreamAnchor(ticket.streamId),
+            ...(canTopup !== undefined ? { canTopup } : {}),
+            ...(fullAmount !== undefined ? { fullAmount } : {}),
           });
         } catch {
           rows.push({ streamId: ticket.streamId, note: "no on-chain anchor" });
@@ -377,6 +401,121 @@ export default function EmployerPage({ payroll }: { payroll: UsePayroll }) {
     await refreshKnownStreams();
   };
 
+  // ---- Top-up (private + public) ----
+  const topupablePrivate = streams.filter(
+    (s) =>
+      s.anchor !== undefined &&
+      !s.anchor.canceled &&
+      s.anchor.coveredUntil > 0n &&
+      s.canTopup === true,
+  );
+  const topupablePublic = knownStreams.filter(
+    (s) =>
+      s.role === "sender" &&
+      s.payroll !== undefined &&
+      s.payroll.canTopup &&
+      s.anchor !== undefined &&
+      !s.anchor.canceled &&
+      s.anchor.coveredUntil > 0n,
+  );
+
+  /** Human-readable quote of what the top-up will pull: debt + extra. */
+  function topupQuoteText(
+    fullAmount: bigint | undefined,
+    anchor: StreamAnchor | undefined,
+    extra: bigint,
+  ): string {
+    if (fullAmount === undefined || anchor === undefined || extra < 0n) return "—";
+    try {
+      const { debtAmount, topupAmount, extraSeconds } = computeTopupAmount(
+        anchor,
+        fullAmount,
+        nowSeconds(),
+        extra,
+      );
+      return (
+        `debt ${debtAmount} + extra ${extra} = ${topupAmount} token units` +
+        ` (buys ${extraSeconds}s of coverage)`
+      );
+    } catch {
+      return "—";
+    }
+  }
+
+  const onTopupPrivate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTopupError(null);
+    setTopupResult(null);
+    let extraValue: bigint;
+    let feeMicro: number;
+    try {
+      if (selectedPrivateTopup === "") throw new Error("select a stream to top up");
+      // extra may be 0 when the stream has accrued debt.
+      extraValue = parseBig(topupExtra, "extra amount");
+      feeMicro = parseFee(topupFee);
+    } catch (err) {
+      setTopupError(err instanceof Error ? err.message : String(err));
+      return;
+    }
+    const confirmed = await runTx(async (svc) => {
+      const txId = await svc.topupStream(selectedPrivateTopup, extraValue, feeMicro);
+      setTopupResult(`transaction submitted: ${txId}\nwaiting for confirmation...`);
+      await svc.waitForConfirmation(txId);
+    });
+    if (confirmed !== undefined) {
+      setTopupResult(`stream topped up: ${selectedPrivateTopup}`);
+      await refreshStreams();
+    }
+  };
+
+  const onTopupPublic = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTopupError(null);
+    setTopupResult(null);
+    let extraValue: bigint;
+    let feeMicro: number;
+    try {
+      if (selectedPublicTopup === "") throw new Error("select a stream to top up");
+      extraValue = parseBig(topupExtra, "extra amount");
+      feeMicro = parseFee(topupFee);
+    } catch (err) {
+      setTopupError(err instanceof Error ? err.message : String(err));
+      return;
+    }
+    const row = topupablePublic.find((s) => s.streamId === selectedPublicTopup);
+    if (row?.anchor === undefined || row.payroll === undefined) {
+      setTopupError("selected stream is missing on-chain state; refresh and retry");
+      return;
+    }
+    const confirmed = await runTx(async (svc) => {
+      // The deposit is pulled from the sender's public balance; approve the
+      // program first when the allowance does not cover the top-up amount.
+      const arc22 = new WalletArc22Service(svc.wallet, TOKEN_PROGRAM_ID);
+      const programAddress = svc.getProgramAddress();
+      const { topupAmount } = computeTopupAmount(
+        row.anchor!,
+        row.payroll!.fullAmount,
+        nowSeconds(),
+        extraValue,
+      );
+      if (topupAmount > 0n) {
+        const allowanceValue = await arc22.getAllowance(svc.address, programAddress);
+        if (allowanceValue < topupAmount) {
+          const approveTxId = await arc22.approve(programAddress, topupAmount);
+          setTopupResult(`approve_public submitted: ${approveTxId}\nwaiting for confirmation...`);
+          await arc22.waitForConfirmation(approveTxId);
+        }
+      }
+      const txId = await svc.topupStreamPublic(selectedPublicTopup, extraValue, feeMicro);
+        setTopupResult(`topup_stream_public submitted: ${txId}\nwaiting for confirmation...`);
+        await svc.waitForConfirmation(txId);
+    });
+    if (confirmed !== undefined) {
+      setTopupResult(`stream topped up: ${selectedPublicTopup}`);
+      await refreshKnownStreams();
+    }
+  };
+
   // Tab navigation handlers
   const setPrivateView = () => setView("private");
   const setPublicView = () => setView("public");
@@ -575,6 +714,36 @@ export default function EmployerPage({ payroll }: { payroll: UsePayroll }) {
             </table>
           )}
         </section>
+
+        <TopUpCard
+          title="Top up stream"
+          busy={busy}
+          options={topupablePrivate.map((s) => ({
+            streamId: s.streamId,
+            label: `${s.streamId}field · covered until ${s.anchor!.coveredUntil}`,
+          }))}
+          selected={selectedPrivateTopup}
+          onSelect={setSelectedPrivateTopup}
+          extra={topupExtra}
+          onExtraChange={setTopupExtra}
+          fee={topupFee}
+          onFeeChange={setTopupFee}
+          quoteText={topupQuoteText(
+            topupablePrivate.find((s) => s.streamId === selectedPrivateTopup)?.fullAmount,
+            topupablePrivate.find((s) => s.streamId === selectedPrivateTopup)?.anchor,
+            (() => {
+              try {
+                return parseBig(topupExtra, "extra");
+              } catch {
+                return -1n;
+              }
+            })(),
+          )}
+          error={topupError}
+          result={topupResult}
+          onSubmit={(e) => void onTopupPrivate(e)}
+          emptyHint="No top-up-enabled outgoing streams found in this wallet."
+        />
         </>
       )}
 
@@ -843,8 +1012,123 @@ export default function EmployerPage({ payroll }: { payroll: UsePayroll }) {
             )}
           </section>
         </section>
+
+        <TopUpCard
+          title="Top up public stream"
+          busy={busy}
+          options={topupablePublic.map((s) => ({
+            streamId: s.streamId,
+            label: `${s.streamId} · covered until ${s.anchor!.coveredUntil}`,
+          }))}
+          selected={selectedPublicTopup}
+          onSelect={setSelectedPublicTopup}
+          extra={topupExtra}
+          onExtraChange={setTopupExtra}
+          fee={topupFee}
+          onFeeChange={setTopupFee}
+          quoteText={topupQuoteText(
+            topupablePublic.find((s) => s.streamId === selectedPublicTopup)?.payroll?.fullAmount,
+            topupablePublic.find((s) => s.streamId === selectedPublicTopup)?.anchor,
+            (() => {
+              try {
+                return parseBig(topupExtra, "extra");
+              } catch {
+                return -1n;
+              }
+            })(),
+          )}
+          error={topupError}
+          result={topupResult}
+          onSubmit={(e) => void onTopupPublic(e)}
+          emptyHint="No top-up-enabled public streams found. Create one above, or add a stream id you were given."
+        />
         </>
       )}
     </>
+  );
+}
+
+function TopUpCard({
+  title,
+  busy,
+  options,
+  selected,
+  onSelect,
+  extra,
+  onExtraChange,
+  fee,
+  onFeeChange,
+  quoteText,
+  error,
+  result,
+  onSubmit,
+  emptyHint,
+}: {
+  title: string;
+  busy: boolean;
+  options: { streamId: string; label: string }[];
+  selected: string;
+  onSelect: (streamId: string) => void;
+  extra: string;
+  onExtraChange: (value: string) => void;
+  fee: string;
+  onFeeChange: (value: string) => void;
+  quoteText: string;
+  error: string | null;
+  result: string | null;
+  onSubmit: (e: React.FormEvent) => void;
+  emptyHint: string;
+}) {
+  return (
+    <section className="card">
+      <h2>{title}</h2>
+      {options.length === 0 ? (
+        <p className="muted">{emptyHint}</p>
+      ) : (
+        <form className="grid" onSubmit={onSubmit}>
+          <label className="field full">
+            Stream
+            <select
+              value={selected}
+              onChange={(e) => onSelect(e.target.value)}
+              disabled={busy}
+            >
+              <option value="">— select a stream —</option>
+              {options.map((o) => (
+                <option key={o.streamId} value={o.streamId}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            Extra amount (token units)
+            <input
+              value={extra}
+              onChange={(e) => onExtraChange(e.target.value)}
+              disabled={busy}
+            />
+          </label>
+          <label className="field">
+            Fee (microcredits)
+            <input value={fee} onChange={(e) => onFeeChange(e.target.value)} disabled={busy} />
+          </label>
+          <p className="muted full">
+            Will transfer: {quoteText}
+          </p>
+          {error !== null && <p className="form-error">{error}</p>}
+          <div className="full">
+            <button
+              className="action"
+              type="submit"
+              disabled={busy || selected === ""}
+            >
+              {busy ? "Working..." : "Top up"}
+            </button>
+          </div>
+        </form>
+      )}
+      {result !== null && <p className="result">{result}</p>}
+    </section>
   );
 }

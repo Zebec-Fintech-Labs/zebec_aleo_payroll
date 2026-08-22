@@ -16,8 +16,11 @@ import type {
   MerkleProof,
   Payroll,
   PayrollConfig,
+  ReceiverTicket,
+  SenderTicket,
   StreamAnchor,
   StreamTokenFee,
+  WithdrawerTicket,
 } from "./types.js";
 
 /** Normalize a field value to its canonical literal form (`"123field"`). */
@@ -268,6 +271,86 @@ export function parsePayrollConfig(plaintext: string): PayrollConfig {
     platformFee: parseIntLiteral(requireMember(m, "platform_fee")),
     initialized: parseBoolLiteral(requireMember(m, "initialized")),
   };
+}
+
+// =========================================================================
+// Ticket record parsing
+// =========================================================================
+
+/**
+ * Parse a decrypted `SenderPayrollTicket` record plaintext (ticket_type 0).
+ * Throws when the plaintext is not a sender ticket.
+ */
+export function parseSenderTicket(plaintext: string): SenderTicket {
+  const m = requireTicketMembers(plaintext, 0);
+  return {
+    owner: requireMember(m, "owner"),
+    ticketType: parseIntLiteral(requireMember(m, "ticket_type")),
+    config: parseFieldLiteral(requireMember(m, "config")),
+    streamId: parseFieldLiteral(requireMember(m, "stream_id")),
+    receiver: requireMember(m, "receiver"),
+    tokenProgram: parseIdentLiteral(requireMember(m, "token_program")),
+    fullAmount: parseIntLiteral(requireMember(m, "full_amount")),
+    isCancelable: parseBoolLiteral(requireMember(m, "is_cancelable")),
+    isPausable: parseBoolLiteral(requireMember(m, "is_pausable")),
+    canTopup: parseBoolLiteral(requireMember(m, "can_topup")),
+    topupCount: parseIntLiteral(requireMember(m, "topup_count")),
+  };
+}
+
+/**
+ * Parse a decrypted `ReceiverPayrollTicket` record plaintext (ticket_type 1).
+ * Throws when the plaintext is not a receiver ticket.
+ */
+export function parseReceiverTicket(plaintext: string): ReceiverTicket {
+  const m = requireTicketMembers(plaintext, 1);
+  return {
+    owner: requireMember(m, "owner"),
+    ticketType: parseIntLiteral(requireMember(m, "ticket_type")),
+    config: parseFieldLiteral(requireMember(m, "config")),
+    sender: requireMember(m, "sender"),
+    tokenProgram: parseIdentLiteral(requireMember(m, "token_program")),
+    fullAmount: parseIntLiteral(requireMember(m, "full_amount")),
+    autoWithdrawable: parseBoolLiteral(requireMember(m, "auto_withdrawable")),
+    streamId: parseFieldLiteral(requireMember(m, "stream_id")),
+  };
+}
+
+/**
+ * Parse a decrypted `WithdrawerPayrollTicket` record plaintext (ticket_type 2).
+ * Throws when the plaintext is not a withdrawer ticket.
+ */
+export function parseWithdrawerTicket(plaintext: string): WithdrawerTicket {
+  const m = requireTicketMembers(plaintext, 2);
+  return {
+    owner: requireMember(m, "owner"),
+    ticketType: parseIntLiteral(requireMember(m, "ticket_type")),
+    config: parseFieldLiteral(requireMember(m, "config")),
+    fullAmount: parseIntLiteral(requireMember(m, "full_amount")),
+    streamId: parseFieldLiteral(requireMember(m, "stream_id")),
+    sender: requireMember(m, "sender"),
+    receiver: requireMember(m, "receiver"),
+    tokenProgram: parseIdentLiteral(requireMember(m, "token_program")),
+    autoWithdrawable: parseBoolLiteral(requireMember(m, "auto_withdrawable")),
+  };
+}
+
+/** Validate the ticket_type of a record plaintext and return its members. */
+function requireTicketMembers(
+  plaintext: string,
+  expectedType: number,
+): Map<string, string> {
+  if (!plaintext) {
+    throw new Error("value is empty: " + plaintext);
+  }
+  const m = parseStructMembers(plaintext);
+  const typeMatch = /(\d+)u8/.exec(requireMember(m, "ticket_type"));
+  if (!typeMatch || Number(typeMatch[1]) !== expectedType) {
+    throw new Error(
+      `not a ticket_type ${expectedType} record (got ${requireMember(m, "ticket_type")})`,
+    );
+  }
+  return m;
 }
 
 

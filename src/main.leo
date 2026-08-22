@@ -208,7 +208,7 @@ const WITHDRAW_FREQUENCIES: [u64; WITHDRAW_FREQUENCIES_LEN] = [
 // timestamp, in seconds.
 const NOW_TOLERANCE: i64 = 2i64 * 60i64; // 2 minutes
 
-program test_zebec_payroll_v6.aleo {
+program test_zebec_payroll_v7.aleo {
     // Payroll configurations, keyed by unique config name (a BHP256 hash of
     // the off-chain name).
     mapping payroll_configs: field => PayrollConfig;
@@ -280,18 +280,31 @@ program test_zebec_payroll_v6.aleo {
         let self_address: address = std::ctx::addr();
 
         assert_create_params(params);
+        
+        let stream_id = params.stream_id;
+        let receiver = params.receiver;
+        let start_now = params.start_now;
+        let start_time = params.start_time;
+        let duration = params.duration;
+        let amount = params.amount;
+        let can_topup = params.can_topup;
+        let is_cancelable = params.is_cancelable;
+        let is_pausable = params.is_pausable;
+        let initial_buffer_amount = params.initial_buffer_amount;
+        let withdraw_frequency = params.withdraw_frequency;
+        let auto_withdrawable = params.auto_withdrawable;
 
-        let deposit_amount: u128 = params.can_topup ? params.initial_buffer_amount : params.amount;
+        let deposit_amount: u128 = can_topup ? initial_buffer_amount : amount;
 
         // Guard the divisor: when auto-withdrawal is disabled the caller may
         // pass withdraw_frequency = 0; the ternary is flattened by the compiler
         // so compute_auto_withdrawal_fee is always evaluated — use the daily
         // default as a safe divisor to avoid a division-by-zero halt.
-        let safe_frequency: u64 = params.withdraw_frequency > 0u64
-            ? params.withdraw_frequency
+        let safe_frequency: u64 = withdraw_frequency > 0u64
+            ? withdraw_frequency
             : DEFAULT_WITHDRAW_FREQUENCY;
-        let auto_withdrawal_fee: u64 = params.auto_withdrawable
-            ? compute_auto_withdrawal_fee(params.duration, safe_frequency, config.base_fee, config.platform_fee)
+        let auto_withdrawal_fee: u64 = auto_withdrawable
+            ? compute_auto_withdrawal_fee(duration, safe_frequency, config.base_fee, config.platform_fee)
             : 0u64;
 
         // Credit record must cover the auto-withdrawal fee, the stream fee,
@@ -323,41 +336,97 @@ program test_zebec_payroll_v6.aleo {
             owner: caller,
             ticket_type: 0u8,
             config: config.config_name,
-            stream_id: params.stream_id,
-            receiver: params.receiver,
+            stream_id: stream_id,
+            receiver: receiver,
             token_program: token_program,
-            full_amount: params.amount,
-            is_cancelable: params.is_cancelable,
-            is_pausable: params.is_pausable,
-            can_topup: params.can_topup,
-            topup_count: params.can_topup ? 1u64 : 0u64, // initial buffer counts as first top-up
+            full_amount: amount,
+            is_cancelable: is_cancelable,
+            is_pausable: is_pausable,
+            can_topup: can_topup,
+            topup_count: can_topup ? 1u64 : 0u64, // initial buffer counts as first top-up
         };
 
         let receiver_ticket = ReceiverPayrollTicket {
-            owner: params.receiver,
+            owner: receiver,
             ticket_type: 1u8,
             config: config.config_name,
             sender: caller,
             token_program: token_program,
-            full_amount: params.amount,
-            auto_withdrawable: params.auto_withdrawable,
-            stream_id: params.stream_id,
+            full_amount: amount,
+            auto_withdrawable: auto_withdrawable,
+            stream_id: stream_id,
         };
 
         let withdrawer_ticket = WithdrawerPayrollTicket {
             owner: config.withdrawer,
             ticket_type: 2u8,
             config: config.config_name,
-            full_amount: params.amount,
-            stream_id: params.stream_id,
+            full_amount: amount,
+            stream_id: stream_id,
             sender: caller,
-            receiver: params.receiver,
+            receiver: receiver,
             token_program: token_program,
-            auto_withdrawable: params.auto_withdrawable,
+            auto_withdrawable: auto_withdrawable,
         };
 
         return (sender_ticket, receiver_ticket, withdrawer_ticket, fee_change, deposit_change, deposit_comp, final {
-            finalize_create_stream(params, config, token_fee, fee_signature, token_program, deposit_amount, caller, false);
+            let now: i64 = std::ctx::block_timestamp();
+
+            // Checks: stream parameter validation.
+            assert(start_now || start_time >= now);
+
+            // Checks: config fields matches on chain config
+            assert(payroll_configs.contains(config.config_name));
+            let chain_config: PayrollConfig = payroll_configs.get(config.config_name);
+            assert_config_fields(chain_config, config);
+
+            // Checks: backend-signed token fee.
+            // Verify nonce is unused (prevents replay attacks).
+            let used = token_fee_nonces.get_or_use(token_fee.nonce, false);
+            assert(!used);
+            // Consume the nonce so this signed fee cannot be replayed.
+            token_fee_nonces.set(token_fee.nonce, true);
+            assert_token_fee_binding(token_fee, config, token_program, now);
+            // Message the admin signed: token id || fee amount || expiry || nonce.
+            let fee_message: field = BHP256::hash_to_field(token_fee);
+            // Verified on-chain with a Schnorr signature against the config admin's key.
+            let fee_valid: bool = std::sig::verify_schnorr(fee_signature, config.admin, fee_message);
+            assert(fee_valid);
+
+            // Checks: token whitelist (scoped to this config).
+            let whitelist_key: field = BHP256::hash_to_field(
+                WhitelistKey { config: config.config_name, token_program: token_program },
+            );
+            let allowed = whitelisted_token_programs.get_or_use(whitelist_key, false);
+            assert(allowed);
+
+            // Checks: stream id is fresh.
+            assert(!stream_anchors.contains(stream_id));
+
+            let final_start_time: i64 = start_now ? now : start_time;
+            let covered_until: i64 = compute_buffer_coverage(
+                deposit_amount, duration, amount, final_start_time, can_topup
+            );
+
+            let stream_anchor = StreamAnchor {
+                stream_id: stream_id,
+                start_time: final_start_time,
+                duration: duration,
+                paused: false,
+                canceled: false,
+                canceled_at: 0i64,
+                deposited_amount: deposit_amount,
+                covered_until: covered_until,
+                last_paused_time: 0i64,
+                paused_interval: 0u64,
+                withdrawn_amount: 0u128,
+                is_public: false,
+                created_timestamp: now,
+                initialized: true,
+            };
+
+            stream_anchors.set(stream_id, stream_anchor);
+
             f_auto_withdrawal_fee_transfer.run();
             f_stream_fee_transfer.run();
             f_deposit_amount_transfer.run();
@@ -761,7 +830,82 @@ program test_zebec_payroll_v6.aleo {
             IARC22@(token_program)::transfer_from_public(caller, self_address, deposit_amount);
 
         return final {
-            finalize_create_stream(params, config, token_fee, fee_signature, token_program, deposit_amount, caller, true);
+            let now: i64 = std::ctx::block_timestamp();
+
+            // Checks: stream parameter validation.
+            assert(params.start_now || params.start_time >= now);
+
+            // Checks: config fields matches on chain config
+            assert(payroll_configs.contains(config.config_name));
+            let chain_config: PayrollConfig = payroll_configs.get(config.config_name);
+            assert_config_fields(chain_config, config);
+
+            // Checks: backend-signed token fee.
+            // Verify nonce is unused (prevents replay attacks).
+            let used = token_fee_nonces.get_or_use(token_fee.nonce, false);
+            assert(!used);
+            // Consume the nonce so this signed fee cannot be replayed.
+            token_fee_nonces.set(token_fee.nonce, true);
+            assert_token_fee_binding(token_fee, config, token_program, now);
+            // Message the admin signed: token id || fee amount || expiry || nonce.
+            let fee_message: field = BHP256::hash_to_field(token_fee);
+            // Verified on-chain with a Schnorr signature against the config admin's key.
+            let fee_valid: bool = std::sig::verify_schnorr(fee_signature, config.admin, fee_message);
+            assert(fee_valid);
+
+            // Checks: token whitelist (scoped to this config).
+            let whitelist_key: field = BHP256::hash_to_field(
+                WhitelistKey { config: config.config_name, token_program: token_program },
+            );
+            let allowed = whitelisted_token_programs.get_or_use(whitelist_key, false);
+            assert(allowed);
+
+            // Checks: stream id is fresh.
+            assert(!stream_anchors.contains(params.stream_id));
+            
+            assert(!payrolls.contains(params.stream_id));
+
+            let start_time: i64 = params.start_now ? now : params.start_time;
+            let covered_until: i64 = compute_buffer_coverage(
+                deposit_amount, params.duration, params.amount, start_time, params.can_topup
+            );
+
+            let stream_anchor = StreamAnchor {
+                stream_id: params.stream_id,
+                start_time: start_time,
+                duration: params.duration,
+                paused: false,
+                canceled: false,
+                canceled_at: 0i64,
+                deposited_amount: deposit_amount,
+                covered_until: covered_until,
+                last_paused_time: 0i64,
+                paused_interval: 0u64,
+                withdrawn_amount: 0u128,
+                is_public: true,
+                created_timestamp: now,
+                initialized: true,
+            };
+
+            stream_anchors.set(params.stream_id, stream_anchor);
+
+            // Public streams store metadata in a mapping for on-chain queryability.
+            let payroll = Payroll {
+                stream_id: params.stream_id,
+                config: config.config_name,
+                sender: caller,
+                receiver: params.receiver,
+                full_amount: params.amount,
+                token_program: token_program,
+                is_cancelable: params.is_cancelable,
+                is_pausable: params.is_pausable,
+                can_topup: params.can_topup,
+                topup_count: params.can_topup ? 1u64 : 0u64, // initial buffer counts as first top-up
+                auto_withdrawable: params.auto_withdrawable,
+                initialized: true,
+            };
+            payrolls.set(params.stream_id, payroll);
+            
             f_stream_fee_transfer.run();
             f_auto_withdrawal_fee_transfer.run();
             f_deposit_transfer.run();
@@ -886,9 +1030,9 @@ program test_zebec_payroll_v6.aleo {
         let self_address: address = std::ctx::addr();
 
         // Check: caller is the payroll sender.
+        assert(payroll.initialized);
         assert(caller == payroll.sender);
         // Check: stream was created with top-up enabled.
-        assert(payroll.initialized);
         assert(payroll.can_topup);
         assert(stream_anchor.initialized);
         assert(stream_anchor.stream_id == payroll.stream_id);
@@ -963,16 +1107,15 @@ program test_zebec_payroll_v6.aleo {
     // own public balance; no allowance required).
     fn withdraw_stream_public(
         payroll: Payroll,
-        config: Config,
         stream_anchor: StreamAnchor,
         now: i64,
     ) -> Final {
         let caller: address = std::ctx::caller();
 
         // Check: caller is the config's withdrawer.
-        assert(caller == config.withdrawer);
-        assert(payroll.stream_id == stream_anchor.stream_id);
         assert(payroll.initialized);
+        assert(caller == payroll.receiver);
+        assert(payroll.stream_id == stream_anchor.stream_id);
         // Check: Stream has started
         assert(stream_anchor.initialized);
         assert(stream_anchor.start_time <= now);
@@ -1214,110 +1357,6 @@ program test_zebec_payroll_v6.aleo {
 
     @admin(address="aleo12czxn500cyj9a7lweuft6r4rrckthfck5k8440qh7atgrnt5kupqsfh038")
     constructor() {}
-}
-
-// =============================================================================
-// Shared finalize logic for create_stream_public and create_stream_private.
-//
-// Contains all on-chain verification and state writes that are identical
-// between the two create paths. Called from within the final {} block of each
-// entry; the caller then runs its own futures after this helper returns.
-//
-// CEI order: all checks and effects (mapping reads, nonce consume, anchor set)
-// happen inside this helper; .run() calls stay in the caller, after the helper.
-// =============================================================================
-final fn finalize_create_stream(
-    params: CreateStreamParams,
-    config: Config,
-    token_fee: StreamTokenFee,
-    fee_signature: signature,
-    token_program: identifier,
-    deposit_amount: u128,
-    caller: address,
-    is_public: bool,
-) {
-    let now: i64 = std::ctx::block_timestamp();
-
-    // Checks: stream parameter validation.
-    assert(params.duration > 0u64);
-    assert(params.receiver != caller);
-    assert(params.amount > 0u128);
-    assert(params.start_now || params.start_time >= now);
-    assert(!params.can_topup || (params.initial_buffer_amount > 0u128 && params.initial_buffer_amount <= params.amount));
-
-    // Checks: config fields matches on chain config
-    assert(payroll_configs.contains(config.config_name));
-    let chain_config: PayrollConfig = payroll_configs.get(config.config_name);
-    assert_config_fields(chain_config, config);
-
-    // Checks: backend-signed token fee.
-    // Verify nonce is unused (prevents replay attacks).
-    let used = token_fee_nonces.get_or_use(token_fee.nonce, false);
-    assert(!used);
-    // Consume the nonce so this signed fee cannot be replayed.
-    token_fee_nonces.set(token_fee.nonce, true);
-    assert_token_fee_binding(token_fee, config, token_program, now);
-    // Message the admin signed: token id || fee amount || expiry || nonce.
-    let fee_message: field = BHP256::hash_to_field(token_fee);
-    // Verified on-chain with a Schnorr signature against the config admin's key.
-    let fee_valid: bool = std::sig::verify_schnorr(fee_signature, config.admin, fee_message);
-    assert(fee_valid);
-
-    // Checks: token whitelist (scoped to this config).
-    let whitelist_key: field = BHP256::hash_to_field(
-        WhitelistKey { config: config.config_name, token_program: token_program },
-    );
-    let allowed = whitelisted_token_programs.get_or_use(whitelist_key, false);
-    assert(allowed);
-
-    // Checks: stream id is fresh.
-    assert(!stream_anchors.contains(params.stream_id));
-    if is_public {
-        assert(!payrolls.contains(params.stream_id));
-    }
-
-    let start_time: i64 = params.start_now ? now : params.start_time;
-    let covered_until: i64 = compute_buffer_coverage(
-        deposit_amount, params.duration, params.amount, start_time, params.can_topup
-    );
-
-    let stream_anchor = StreamAnchor {
-        stream_id: params.stream_id,
-        start_time: start_time,
-        duration: params.duration,
-        paused: false,
-        canceled: false,
-        canceled_at: 0i64,
-        deposited_amount: deposit_amount,
-        covered_until: covered_until,
-        last_paused_time: 0i64,
-        paused_interval: 0u64,
-        withdrawn_amount: 0u128,
-        is_public: is_public,
-        created_timestamp: now,
-        initialized: true,
-    };
-
-    stream_anchors.set(params.stream_id, stream_anchor);
-
-    // Public streams store metadata in a mapping for on-chain queryability.
-    if is_public {
-        let payroll = Payroll {
-            stream_id: params.stream_id,
-            config: config.config_name,
-            sender: caller,
-            receiver: params.receiver,
-            full_amount: params.amount,
-            token_program: token_program,
-            is_cancelable: params.is_cancelable,
-            is_pausable: params.is_pausable,
-            can_topup: params.can_topup,
-            topup_count: params.can_topup ? 1u64 : 0u64, // initial buffer counts as first top-up
-            auto_withdrawable: params.auto_withdrawable,
-            initialized: true,
-        };
-        payrolls.set(params.stream_id, payroll);
-    }
 }
 
 // =============================================================================
