@@ -581,9 +581,6 @@ program test_zebec_payroll_v7.aleo {
         let effective_time: i64 = stream_anchor.paused ? stream_anchor.last_paused_time : now;
         // Check: stream has started.
         assert(stream_anchor.start_time <= effective_time);
-        // Check: stream has not ended.
-        let elapsed_duration: u64 = (effective_time as u64 - stream_anchor.start_time as u64) - stream_anchor.paused_interval;
-        assert(elapsed_duration < stream_anchor.duration);
 
         // Debt in stream time: paused durations do not accrue debt.
         let stream_time_now: i64 = effective_time - stream_anchor.paused_interval as i64;
@@ -1044,9 +1041,6 @@ program test_zebec_payroll_v7.aleo {
         let effective_time: i64 = stream_anchor.paused ? stream_anchor.last_paused_time : now;
         // Check: stream has started.
         assert(stream_anchor.start_time <= effective_time);
-        // Check: stream has not ended.
-        let elapsed_duration: u64 = (effective_time as u64 - stream_anchor.start_time as u64) - stream_anchor.paused_interval;
-        assert(elapsed_duration < stream_anchor.duration);
 
         // Debt in stream time: paused durations do not accrue debt.
         let stream_time_now: i64 = effective_time - stream_anchor.paused_interval as i64;
