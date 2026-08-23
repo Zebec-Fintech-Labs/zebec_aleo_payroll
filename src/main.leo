@@ -1097,8 +1097,10 @@ program test_zebec_payroll_v7.aleo {
         };
     }
 
-    // Payout uses the caller-based `transfer_public` (the program spends its
-    // own public balance; no allowance required).
+    // Receiver self-withdraw. Payout uses the caller-based `transfer_public`
+    // (the program spends its own public balance; no allowance required).
+    // Authorization is the on-chain payroll receiver — no Config input, so a
+    // fabricated withdrawer cannot force this path.
     fn withdraw_stream_public(
         payroll: Payroll,
         stream_anchor: StreamAnchor,
@@ -1106,10 +1108,10 @@ program test_zebec_payroll_v7.aleo {
     ) -> Final {
         let caller: address = std::ctx::caller();
 
-        // Check: caller is the config's withdrawer.
-        assert(payroll.initialized);
+        // Check: caller is the stream receiver.
         assert(caller == payroll.receiver);
         assert(payroll.stream_id == stream_anchor.stream_id);
+        assert(payroll.initialized);
         // Check: Stream has started
         assert(stream_anchor.initialized);
         assert(stream_anchor.start_time <= now);
@@ -1156,6 +1158,9 @@ program test_zebec_payroll_v7.aleo {
             assert(payrolls.contains(payroll.stream_id));
             let onchain_payroll = payrolls.get(payroll.stream_id);
             assert_payroll_eq(payroll, onchain_payroll);
+            // Re-check against on-chain state so a stale snapshot cannot
+            // authorize a different receiver.
+            assert(caller == onchain_payroll.receiver);
             // Check: stream exists and anchor matches.
             assert(stream_anchors.contains(stream_anchor.stream_id));
             let onchain_stream_anchor = stream_anchors.get(stream_anchor.stream_id);
@@ -1172,6 +1177,9 @@ program test_zebec_payroll_v7.aleo {
         };
     }
 
+    // Withdrawer-triggered payout for a public stream that opted into
+    // auto-withdraw. Tenant-bound: the supplied config must be the stream's
+    // payroll config, and the caller must be that config's on-chain withdrawer.
     fn withdraw_stream_auto_public(
         payroll: Payroll,
         config: Config,
@@ -1180,8 +1188,12 @@ program test_zebec_payroll_v7.aleo {
     ) -> Final {
         let caller: address = std::ctx::caller();
 
-        // Check: caller is the config withdrawer.
+        // Check: caller is this stream's tenant withdrawer, and the stream
+        // opted into auto-withdraw. Binding payroll.config prevents a
+        // foreign config (with the attacker as withdrawer) from authorizing.
         assert(caller == config.withdrawer);
+        assert(payroll.config == config.config_name);
+        assert(payroll.auto_withdrawable);
         assert(payroll.stream_id == stream_anchor.stream_id);
         assert(payroll.initialized); 
         // Check: Stream has started
@@ -1230,10 +1242,13 @@ program test_zebec_payroll_v7.aleo {
             assert(payrolls.contains(payroll.stream_id));
             let onchain_payroll = payrolls.get(payroll.stream_id);
             assert_payroll_eq(payroll, onchain_payroll);
-            // Check: config exists and matches.
+            // Check: config exists, matches, and is this stream's tenant.
             assert(payroll_configs.contains(config.config_name));
             let chain_config: PayrollConfig = payroll_configs.get(config.config_name);
             assert_config_fields(chain_config, config);
+            assert(onchain_payroll.config == config.config_name);
+            assert(onchain_payroll.auto_withdrawable);
+            assert(caller == chain_config.withdrawer);
             // Check: stream exists and anchor matches.
             assert(stream_anchors.contains(stream_anchor.stream_id));
             let onchain_stream_anchor = stream_anchors.get(stream_anchor.stream_id);
