@@ -948,9 +948,9 @@ program test_zebec_payroll_v7.aleo {
         let caller: address = std::ctx::caller();
 
         // Check: caller is the sender.
+        assert(payroll.initialized);
         assert(caller == payroll.sender);
         assert(payroll.is_cancelable);
-        assert(payroll.initialized);
         assert(stream_anchor.stream_id == payroll.stream_id);
         assert(stream_anchor.initialized);
         assert(!stream_anchor.canceled);
@@ -1109,9 +1109,9 @@ program test_zebec_payroll_v7.aleo {
         let caller: address = std::ctx::caller();
 
         // Check: caller is the stream receiver.
+        assert(payroll.initialized);
         assert(caller == payroll.receiver);
         assert(payroll.stream_id == stream_anchor.stream_id);
-        assert(payroll.initialized);
         // Check: Stream has started
         assert(stream_anchor.initialized);
         assert(stream_anchor.start_time <= now);
@@ -1192,10 +1192,10 @@ program test_zebec_payroll_v7.aleo {
         // opted into auto-withdraw. Binding payroll.config prevents a
         // foreign config (with the attacker as withdrawer) from authorizing.
         assert(caller == config.withdrawer);
+        assert(payroll.initialized); 
         assert(payroll.config == config.config_name);
         assert(payroll.auto_withdrawable);
         assert(payroll.stream_id == stream_anchor.stream_id);
-        assert(payroll.initialized); 
         // Check: Stream has started
         assert(stream_anchor.initialized);
         assert(stream_anchor.start_time <= now);
