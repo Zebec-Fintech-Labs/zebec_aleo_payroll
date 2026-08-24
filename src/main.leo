@@ -582,42 +582,31 @@ program test_zebec_payroll_v8.aleo {
         // Check: stream has started.
         assert(stream_anchor.start_time <= effective_time);
 
-        // Debt is measured in normalized stream time, where completed pauses
-        // have been removed. Clamp it at the contractual end so debt cannot
-        // accumulate indefinitely after the stream has ended.
-        let stream_time_now: i64 = effective_time - stream_anchor.paused_interval as i64;
-        let max_stream_time: i64 = stream_anchor.start_time + stream_anchor.duration as i64;
-        let capped_stream_time: i64 = stream_time_now < max_stream_time ? stream_time_now : max_stream_time;
-        let debt_seconds: i64 = capped_stream_time > stream_anchor.covered_until ? capped_stream_time - stream_anchor.covered_until : 0i64;
-        let calculated_debt: u128 = debt_seconds as u128 * ticket_record.full_amount / stream_anchor.duration as u128;
-        // Defense in depth: a stream can never require more than its remaining
-        // contractual funding, even if an old anchor has surplus deposits.
-        let max_possible_debt: u128 = stream_anchor.deposited_amount < ticket_record.full_amount
+        let (vested_amount, _) = compute_withdrawable_amount(
+            effective_time,
+            stream_anchor.start_time,
+            stream_anchor.duration,
+            stream_anchor.paused_interval,
+            ticket_record.full_amount,
+            0u128
+        );
+        let max_possible_topup: u128 = stream_anchor.deposited_amount < ticket_record.full_amount
             ? ticket_record.full_amount - stream_anchor.deposited_amount
             : 0u128;
-        let debt_amount: u128 = calculated_debt < max_possible_debt ? calculated_debt : max_possible_debt;
-
-        // Extra may only buy the remaining contractual coverage. This accepts
-        // debt-only top-ups after the end while preventing surplus funds from
-        // becoming trapped once cancellation is unavailable.
-        let coverage_floor: i64 = stream_anchor.covered_until > capped_stream_time
-            ? stream_anchor.covered_until
-            : capped_stream_time;
-        let remaining_coverage_seconds: i64 = max_stream_time > coverage_floor
-            ? max_stream_time - coverage_floor
-            : 0i64;
-        let max_extra: u128 = remaining_coverage_seconds > 0i64
-            ? remaining_coverage_seconds as u128 * ticket_record.full_amount / stream_anchor.duration as u128
+        let calculated_debt: u128 = vested_amount > stream_anchor.deposited_amount
+            ? vested_amount - stream_anchor.deposited_amount
             : 0u128;
-        let accepted_extra: u128 = extra < max_extra ? extra : max_extra;
+        let debt_amount: u128 = calculated_debt < max_possible_topup
+            ? calculated_debt
+            : max_possible_topup;
+
+        // Extra is capped after debt, so the combined transfer can never
+        // exceed the stream's total contractual funding.
+        let remaining_capacity: u128 = max_possible_topup - debt_amount;
+        let accepted_extra: u128 = extra < remaining_capacity ? extra : remaining_capacity;
 
         let topup_amount: u128 = debt_amount + accepted_extra;
         assert(topup_amount > 0u128);
-
-        // Covered seconds bought by the accepted extra pre-payment.
-        let extra_seconds_u128: u128 = accepted_extra * stream_anchor.duration as u128 / ticket_record.full_amount;
-        assert(extra_seconds_u128 <= I64_MAX);
-        let extra_seconds: i64 = extra_seconds_u128 as i64;
 
         // Pull the top-up into the program's public balance (same pattern as
         // the create_stream_private deposit). The sender's token change record
@@ -629,6 +618,7 @@ program test_zebec_payroll_v8.aleo {
             );
 
         let stream_id = ticket_record.stream_id;
+        let full_amount: u128 = ticket_record.full_amount;
         let updated_ticket = SenderPayrollTicket { ..ticket_record };
         updated_ticket.topup_count = ticket_record.topup_count + 1u64;
 
@@ -648,11 +638,19 @@ program test_zebec_payroll_v8.aleo {
                 ..onchain_stream_anchor
             };
             updated_stream_anchor.deposited_amount = onchain_stream_anchor.deposited_amount + topup_amount;
-            // Advance coverage monotonically in normalized stream time, but
-            // never beyond the contractual end.
-            let coverage_base: i64 = onchain_stream_anchor.covered_until > capped_stream_time ? onchain_stream_anchor.covered_until : capped_stream_time;
-            let advanced_coverage: i64 = coverage_base + extra_seconds;
-            updated_stream_anchor.covered_until = advanced_coverage < max_stream_time ? advanced_coverage : max_stream_time;
+            // Recompute funded coverage from the cumulative deposit. Both this
+            // value and covered_until use normalized stream time (completed
+            // pauses are removed), so no paused interval is added here.
+            let recomputed_coverage = compute_buffer_coverage(
+                updated_stream_anchor.deposited_amount,
+                onchain_stream_anchor.duration,
+                full_amount,
+                onchain_stream_anchor.start_time,
+                true
+            );
+            updated_stream_anchor.covered_until = onchain_stream_anchor.covered_until > recomputed_coverage
+                ? onchain_stream_anchor.covered_until
+                : recomputed_coverage;
             stream_anchors.set(stream_id, updated_stream_anchor);
 
             f_topup_transfer.run();
@@ -1067,40 +1065,31 @@ program test_zebec_payroll_v8.aleo {
         // Check: stream has started.
         assert(stream_anchor.start_time <= effective_time);
 
-        // Debt is measured in normalized stream time, where completed pauses
-        // have been removed. Clamp it at the contractual end so debt cannot
-        // accumulate indefinitely after the stream has ended.
-        let stream_time_now: i64 = effective_time - stream_anchor.paused_interval as i64;
-        let max_stream_time: i64 = stream_anchor.start_time + stream_anchor.duration as i64;
-        let capped_stream_time: i64 = stream_time_now < max_stream_time ? stream_time_now : max_stream_time;
-        let debt_seconds: i64 = capped_stream_time > stream_anchor.covered_until ? capped_stream_time - stream_anchor.covered_until : 0i64;
-        let calculated_debt: u128 = debt_seconds as u128 * payroll.full_amount / stream_anchor.duration as u128;
-        let max_possible_debt: u128 = stream_anchor.deposited_amount < payroll.full_amount
+        let (vested_amount, _) = compute_withdrawable_amount(
+            effective_time,
+            stream_anchor.start_time,
+            stream_anchor.duration,
+            stream_anchor.paused_interval,
+            payroll.full_amount,
+            0u128
+        );
+        let max_possible_topup: u128 = stream_anchor.deposited_amount < payroll.full_amount
             ? payroll.full_amount - stream_anchor.deposited_amount
             : 0u128;
-        let debt_amount: u128 = calculated_debt < max_possible_debt ? calculated_debt : max_possible_debt;
-
-        // Extra may only buy the remaining contractual coverage. This accepts
-        // debt-only top-ups after the end while preventing surplus funds from
-        // becoming trapped once cancellation is unavailable.
-        let coverage_floor: i64 = stream_anchor.covered_until > capped_stream_time
-            ? stream_anchor.covered_until
-            : capped_stream_time;
-        let remaining_coverage_seconds: i64 = max_stream_time > coverage_floor
-            ? max_stream_time - coverage_floor
-            : 0i64;
-        let max_extra: u128 = remaining_coverage_seconds > 0i64
-            ? remaining_coverage_seconds as u128 * payroll.full_amount / stream_anchor.duration as u128
+        let calculated_debt: u128 = vested_amount > stream_anchor.deposited_amount
+            ? vested_amount - stream_anchor.deposited_amount
             : 0u128;
-        let accepted_extra: u128 = extra < max_extra ? extra : max_extra;
+        let debt_amount: u128 = calculated_debt < max_possible_topup
+            ? calculated_debt
+            : max_possible_topup;
+
+        // Extra is capped after debt, so the combined transfer can never
+        // exceed the stream's total contractual funding.
+        let remaining_capacity: u128 = max_possible_topup - debt_amount;
+        let accepted_extra: u128 = extra < remaining_capacity ? extra : remaining_capacity;
 
         let topup_amount: u128 = debt_amount + accepted_extra;
         assert(topup_amount > 0u128);
-
-        // Covered seconds bought by the accepted extra pre-payment.
-        let extra_seconds_u128: u128 = accepted_extra * stream_anchor.duration as u128 / payroll.full_amount;
-        assert(extra_seconds_u128 <= I64_MAX);
-        let extra_seconds: i64 = extra_seconds_u128 as i64;
 
         // Pull the top-up into the program's public balance
         let f_topup_transfer: Final =
@@ -1134,11 +1123,19 @@ program test_zebec_payroll_v8.aleo {
                 ..onchain_stream_anchor
             };
             updated_stream_anchor.deposited_amount = onchain_stream_anchor.deposited_amount + topup_amount;
-            // Advance coverage monotonically in normalized stream time, but
-            // never beyond the contractual end.
-            let coverage_base: i64 = onchain_stream_anchor.covered_until > capped_stream_time ? onchain_stream_anchor.covered_until : capped_stream_time;
-            let advanced_coverage: i64 = coverage_base + extra_seconds;
-            updated_stream_anchor.covered_until = advanced_coverage < max_stream_time ? advanced_coverage : max_stream_time;
+            // Recompute funded coverage from the cumulative deposit. Both this
+            // value and covered_until use normalized stream time (completed
+            // pauses are removed), so no paused interval is added here.
+            let recomputed_coverage = compute_buffer_coverage(
+                updated_stream_anchor.deposited_amount,
+                onchain_stream_anchor.duration,
+                payroll.full_amount,
+                onchain_stream_anchor.start_time,
+                true
+            );
+            updated_stream_anchor.covered_until = onchain_stream_anchor.covered_until > recomputed_coverage
+                ? onchain_stream_anchor.covered_until
+                : recomputed_coverage;
             stream_anchors.set(payroll.stream_id, updated_stream_anchor);
 
             f_topup_transfer.run();
