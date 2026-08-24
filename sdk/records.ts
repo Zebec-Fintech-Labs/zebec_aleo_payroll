@@ -1,5 +1,5 @@
 /**
- * Helpers for locating unspent records needed by `test_zebec_payroll_v7.aleo`
+ * Helpers for locating unspent records needed by `test_zebec_payroll_v8.aleo`
  * transitions: `credits.aleo` records for fees, IARC22 token records for
  * stream deposits, and payroll ticket records for stream management.
  */

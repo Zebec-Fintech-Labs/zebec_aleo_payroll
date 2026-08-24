@@ -208,7 +208,7 @@ const WITHDRAW_FREQUENCIES: [u64; WITHDRAW_FREQUENCIES_LEN] = [
 // timestamp, in seconds.
 const NOW_TOLERANCE: i64 = 2i64 * 60i64; // 2 minutes
 
-program test_zebec_payroll_v7.aleo {
+program test_zebec_payroll_v8.aleo {
     // Payroll configurations, keyed by unique config name (a BHP256 hash of
     // the off-chain name).
     mapping payroll_configs: field => PayrollConfig;
@@ -972,12 +972,12 @@ program test_zebec_payroll_v7.aleo {
     ) -> Final {
         let caller: address = std::ctx::caller();
 
+        assert(payroll.initialized);
+        assert(stream_anchor.initialized);
         // Check: caller is the sender.
         assert(caller == payroll.sender);
         assert(payroll.is_cancelable);
-        assert(payroll.initialized);
         assert(stream_anchor.stream_id == payroll.stream_id);
-        assert(stream_anchor.initialized);
         assert(!stream_anchor.canceled);
         assert(stream_anchor.is_public);
         
@@ -1053,10 +1053,10 @@ program test_zebec_payroll_v7.aleo {
 
         // Check: caller is the payroll sender.
         assert(payroll.initialized);
+        assert(stream_anchor.initialized);
         assert(caller == payroll.sender);
         // Check: stream was created with top-up enabled.
         assert(payroll.can_topup);
-        assert(stream_anchor.initialized);
         assert(stream_anchor.stream_id == payroll.stream_id);
         assert(!stream_anchor.canceled);
         assert(stream_anchor.is_public);
@@ -1157,9 +1157,9 @@ program test_zebec_payroll_v7.aleo {
         let caller: address = std::ctx::caller();
 
         // Check: caller is the stream receiver.
+        assert(payroll.initialized);
         assert(caller == payroll.receiver);
         assert(payroll.stream_id == stream_anchor.stream_id);
-        assert(payroll.initialized);
         // Check: Stream has started
         assert(stream_anchor.initialized);
         assert(stream_anchor.start_time <= now);
@@ -1206,9 +1206,6 @@ program test_zebec_payroll_v7.aleo {
             assert(payrolls.contains(payroll.stream_id));
             let onchain_payroll = payrolls.get(payroll.stream_id);
             assert_payroll_eq(payroll, onchain_payroll);
-            // Re-check against on-chain state so a stale snapshot cannot
-            // authorize a different receiver.
-            assert(caller == onchain_payroll.receiver);
             // Check: stream exists and anchor matches.
             assert(stream_anchors.contains(stream_anchor.stream_id));
             let onchain_stream_anchor = stream_anchors.get(stream_anchor.stream_id);
@@ -1240,10 +1237,10 @@ program test_zebec_payroll_v7.aleo {
         // opted into auto-withdraw. Binding payroll.config prevents a
         // foreign config (with the attacker as withdrawer) from authorizing.
         assert(caller == config.withdrawer);
+        assert(payroll.initialized); 
         assert(payroll.config == config.config_name);
         assert(payroll.auto_withdrawable);
         assert(payroll.stream_id == stream_anchor.stream_id);
-        assert(payroll.initialized); 
         // Check: Stream has started
         assert(stream_anchor.initialized);
         assert(stream_anchor.start_time <= now);
@@ -1294,9 +1291,6 @@ program test_zebec_payroll_v7.aleo {
             assert(payroll_configs.contains(config.config_name));
             let chain_config: PayrollConfig = payroll_configs.get(config.config_name);
             assert_config_fields(chain_config, config);
-            assert(onchain_payroll.config == config.config_name);
-            assert(onchain_payroll.auto_withdrawable);
-            assert(caller == chain_config.withdrawer);
             // Check: stream exists and anchor matches.
             assert(stream_anchors.contains(stream_anchor.stream_id));
             let onchain_stream_anchor = stream_anchors.get(stream_anchor.stream_id);
