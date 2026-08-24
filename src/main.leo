@@ -121,7 +121,6 @@ struct StreamAnchor {
     canceled: bool,
     canceled_at: i64,
     deposited_amount: u128,
-    covered_until: i64,
     last_paused_time: i64,
     paused_interval: u64,
     withdrawn_amount: u128,
@@ -171,12 +170,6 @@ struct Config {
     base_fee: u64,
     platform_fee: u64,
 }
-
-// Maximum u64 value, widened to u128 for range checks on widened arithmetic.
-const U64_MAX: u128 = 18_446_744_073_709_551_615u128;
-
-// Maximum i64 value, widened to u128 for range checks on widened arithmetic.
-const I64_MAX: u128 = 9_223_372_036_854_775_807u128;
 
 // Fallback withdraw frequency (1 day) used as a guarded divisor when
 // auto-withdrawal is disabled, because Leo flattens ternary branches so the
@@ -404,10 +397,6 @@ program test_zebec_payroll_v8.aleo {
             assert(!stream_anchors.contains(stream_id));
 
             let final_start_time: i64 = start_now ? now : start_time;
-            let covered_until: i64 = compute_buffer_coverage(
-                deposit_amount, duration, amount, final_start_time, can_topup
-            );
-
             let stream_anchor = StreamAnchor {
                 stream_id: stream_id,
                 start_time: final_start_time,
@@ -416,7 +405,6 @@ program test_zebec_payroll_v8.aleo {
                 canceled: false,
                 canceled_at: 0i64,
                 deposited_amount: deposit_amount,
-                covered_until: covered_until,
                 last_paused_time: 0i64,
                 paused_interval: 0u64,
                 withdrawn_amount: 0u128,
@@ -549,13 +537,9 @@ program test_zebec_payroll_v8.aleo {
         });
     }
 
-    // Top up a buffer-mode private stream (debt model). Sender only: owning
-    // the SenderPayrollTicket record is the authorization. Debt is measured
-    // in stream time (pause-aware), mirroring the accrual logic:
-    //   stream_time_now = effective_time - paused_interval
-    //   debt = max(0, stream_time_now - covered_until) * full_amount / duration
-    // The top-up pays the accrued debt plus an optional `extra` pre-payment;
-    // `extra` buys extra * duration / full_amount additional covered seconds.
+    // Top up a private stream. Sender only: owning the SenderPayrollTicket
+    // record is the authorization. Debt is the vested amount not yet deposited;
+    // extra is capped so the combined deposit cannot exceed the stream total.
     fn topup_stream_private(
         ticket_record: SenderPayrollTicket,
         stream_anchor: StreamAnchor,
@@ -575,9 +559,6 @@ program test_zebec_payroll_v8.aleo {
         assert(stream_anchor.stream_id == ticket_record.stream_id);
         assert(!stream_anchor.canceled);
         assert(!stream_anchor.is_public);
-        // Check: buffer-mode streams have a non-zero covered_until.
-        assert(stream_anchor.covered_until > 0i64);
-
         let effective_time: i64 = stream_anchor.paused ? stream_anchor.last_paused_time : now;
         // Check: stream has started.
         assert(stream_anchor.start_time <= effective_time);
@@ -615,10 +596,9 @@ program test_zebec_payroll_v8.aleo {
         let (comp, change, f_topup_transfer): (dyn record, dyn record, Final) =
             IARC22@(ticket_record.token_program)::transfer_private_to_public(
                 self_address, topup_amount, token_input_record, sender_merkle_proofs
-            );
+        );
 
         let stream_id = ticket_record.stream_id;
-        let full_amount: u128 = ticket_record.full_amount;
         let updated_ticket = SenderPayrollTicket { ..ticket_record };
         updated_ticket.topup_count = ticket_record.topup_count + 1u64;
 
@@ -638,19 +618,6 @@ program test_zebec_payroll_v8.aleo {
                 ..onchain_stream_anchor
             };
             updated_stream_anchor.deposited_amount = onchain_stream_anchor.deposited_amount + topup_amount;
-            // Recompute funded coverage from the cumulative deposit. Both this
-            // value and covered_until use normalized stream time (completed
-            // pauses are removed), so no paused interval is added here.
-            let recomputed_coverage = compute_buffer_coverage(
-                updated_stream_anchor.deposited_amount,
-                onchain_stream_anchor.duration,
-                full_amount,
-                onchain_stream_anchor.start_time,
-                true
-            );
-            updated_stream_anchor.covered_until = onchain_stream_anchor.covered_until > recomputed_coverage
-                ? onchain_stream_anchor.covered_until
-                : recomputed_coverage;
             stream_anchors.set(stream_id, updated_stream_anchor);
 
             f_topup_transfer.run();
@@ -681,12 +648,8 @@ program test_zebec_payroll_v8.aleo {
         assert(stream_anchor.withdrawn_amount < ticket_record.full_amount);
         assert(stream_anchor.deposited_amount > stream_anchor.withdrawn_amount);
 
-        // Buffer mode (covered_until > 0): cap accrual at the funded coverage
-        // window so the receiver cannot drain the buffer instantly.
-        let accrual_time: i64 = (stream_anchor.covered_until > 0i64 && effective_time > stream_anchor.covered_until) ? stream_anchor.covered_until : effective_time;
-
         let (total_withdrawable_amount, currently_withdrawable_amount) = compute_withdrawable_amount(
-            accrual_time,
+            effective_time,
             stream_anchor.start_time,
             stream_anchor.duration,
             stream_anchor.paused_interval,
@@ -761,11 +724,8 @@ program test_zebec_payroll_v8.aleo {
         assert(stream_anchor.withdrawn_amount < ticket_record.full_amount);
         assert(stream_anchor.deposited_amount > stream_anchor.withdrawn_amount);
 
-        // Buffer mode: cap accrual at the funded coverage window.
-        let accrual_time: i64 = (stream_anchor.covered_until > 0i64 && effective_time > stream_anchor.covered_until) ? stream_anchor.covered_until : effective_time;
-
         let (total_withdrawable_amount, currently_withdrawable_amount) = compute_withdrawable_amount(
-            accrual_time,
+            effective_time,
             stream_anchor.start_time,
             stream_anchor.duration,
             stream_anchor.paused_interval,
@@ -886,10 +846,6 @@ program test_zebec_payroll_v8.aleo {
             assert(!payrolls.contains(params.stream_id));
 
             let start_time: i64 = params.start_now ? now : params.start_time;
-            let covered_until: i64 = compute_buffer_coverage(
-                deposit_amount, params.duration, params.amount, start_time, params.can_topup
-            );
-
             let stream_anchor = StreamAnchor {
                 stream_id: params.stream_id,
                 start_time: start_time,
@@ -898,7 +854,6 @@ program test_zebec_payroll_v8.aleo {
                 canceled: false,
                 canceled_at: 0i64,
                 deposited_amount: deposit_amount,
-                covered_until: covered_until,
                 last_paused_time: 0i64,
                 paused_interval: 0u64,
                 withdrawn_amount: 0u128,
@@ -1058,9 +1013,6 @@ program test_zebec_payroll_v8.aleo {
         assert(stream_anchor.stream_id == payroll.stream_id);
         assert(!stream_anchor.canceled);
         assert(stream_anchor.is_public);
-        // Check: buffer-mode streams have a non-zero covered_until.
-        assert(stream_anchor.covered_until > 0i64);
-
         let effective_time: i64 = stream_anchor.paused ? stream_anchor.last_paused_time : now;
         // Check: stream has started.
         assert(stream_anchor.start_time <= effective_time);
@@ -1123,19 +1075,6 @@ program test_zebec_payroll_v8.aleo {
                 ..onchain_stream_anchor
             };
             updated_stream_anchor.deposited_amount = onchain_stream_anchor.deposited_amount + topup_amount;
-            // Recompute funded coverage from the cumulative deposit. Both this
-            // value and covered_until use normalized stream time (completed
-            // pauses are removed), so no paused interval is added here.
-            let recomputed_coverage = compute_buffer_coverage(
-                updated_stream_anchor.deposited_amount,
-                onchain_stream_anchor.duration,
-                payroll.full_amount,
-                onchain_stream_anchor.start_time,
-                true
-            );
-            updated_stream_anchor.covered_until = onchain_stream_anchor.covered_until > recomputed_coverage
-                ? onchain_stream_anchor.covered_until
-                : recomputed_coverage;
             stream_anchors.set(payroll.stream_id, updated_stream_anchor);
 
             f_topup_transfer.run();
@@ -1170,11 +1109,8 @@ program test_zebec_payroll_v8.aleo {
         assert(stream_anchor.withdrawn_amount < payroll.full_amount);
         assert(stream_anchor.deposited_amount > stream_anchor.withdrawn_amount);
 
-        // Buffer mode: cap accrual at the funded coverage window.
-        let accrual_time: i64 = (stream_anchor.covered_until > 0i64 && effective_time > stream_anchor.covered_until) ? stream_anchor.covered_until : effective_time;
-
         let (total_withdrawable_amount, currently_withdrawable_amount) = compute_withdrawable_amount(
-            accrual_time,
+            effective_time,
             stream_anchor.start_time,
             stream_anchor.duration,
             stream_anchor.paused_interval,
@@ -1251,11 +1187,8 @@ program test_zebec_payroll_v8.aleo {
         assert(stream_anchor.withdrawn_amount < payroll.full_amount);
         assert(stream_anchor.deposited_amount > stream_anchor.withdrawn_amount);
 
-        // Buffer mode: cap accrual at the funded coverage window.
-        let accrual_time: i64 = (stream_anchor.covered_until > 0i64 && effective_time > stream_anchor.covered_until) ? stream_anchor.covered_until : effective_time;
-
         let (total_withdrawable_amount, currently_withdrawable_amount) = compute_withdrawable_amount(
-            accrual_time,
+            effective_time,
             stream_anchor.start_time,
             stream_anchor.duration,
             stream_anchor.paused_interval,
@@ -1414,10 +1347,6 @@ program test_zebec_payroll_v8.aleo {
 fn assert_create_params(params: CreateStreamParams) {
     assert(params.duration > 0u64);
     assert(params.amount > 0u128);
-    // duration must fit i64 arithmetic: covered_until = start_time + buffer_secs,
-    // where buffer_secs <= duration (deposit <= amount). This bounds prevents
-    // i64 overflow in covered_until computation.
-    assert(params.duration as u128 <= I64_MAX);
     assert(!params.can_topup || (params.initial_buffer_amount > 0u128 && params.initial_buffer_amount <= params.amount));
     assert(!params.auto_withdrawable || (params.withdraw_frequency > 0u64 && is_withdraw_frequency_valid(params.withdraw_frequency)));
 }
@@ -1468,7 +1397,6 @@ fn assert_stream_anchor_eq(provided: StreamAnchor, onchain: StreamAnchor) {
     assert(onchain.canceled == provided.canceled);
     assert(onchain.canceled_at == provided.canceled_at);
     assert(onchain.deposited_amount == provided.deposited_amount);
-    assert(onchain.covered_until == provided.covered_until);
     assert(onchain.last_paused_time == provided.last_paused_time);
     assert(onchain.paused_interval == provided.paused_interval);
     assert(onchain.withdrawn_amount == provided.withdrawn_amount);
@@ -1542,29 +1470,6 @@ fn apply_pause_toggle(anchor: StreamAnchor, now: i64) -> StreamAnchor {
         updated.last_paused_time = now;
     }
     return updated;
-}
-
-// Compute the buffer-mode `covered_until` timestamp for a freshly created
-// stream. Returns 0 when top-up mode is disabled.
-//
-// Safety: deposit_amount <= params.amount is enforced by assert_create_params,
-// so buffer_secs <= duration. The duration <= I64_MAX bound (also in
-// assert_create_params) transitively keeps buffer_secs within u64 and the
-// resulting covered_until within i64.
-fn compute_buffer_coverage(
-    deposit_amount: u128,
-    duration: u64,
-    full_amount: u128,
-    start_time: i64,
-    can_topup: bool,
-) -> i64 {
-    let buffer_secs_u128: u128 = (deposit_amount * duration as u128) / full_amount;
-    // Explicit guard: buffer_secs must fit u64 before the cast. The duration
-    // bound in assert_create_params makes this reachable only by extreme
-    // inputs, but we keep it for defense-in-depth and to give U64_MAX a use.
-    assert(buffer_secs_u128 <= U64_MAX);
-    let buffer_secs: u64 = buffer_secs_u128 as u64;
-    return can_topup ? start_time + buffer_secs as i64 : 0i64;
 }
 
 // Compute the auto-withdrawal fee in microcredits for a stream.
