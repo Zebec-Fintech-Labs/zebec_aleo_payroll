@@ -48,7 +48,6 @@ export interface StreamAnchor {
   canceled: boolean;
   canceledAt: bigint;
   depositedAmount: bigint;
-  coveredUntil: bigint;
   lastPausedTime: bigint;
   pausedInterval: bigint;
   withdrawnAmount: bigint;

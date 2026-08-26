@@ -552,30 +552,41 @@ export class WalletPayrollService {
   /**
    * Preview the withdrawable amounts of a stream at `now` by combining the
    * on-chain anchor with the off-chain vesting math. Mirrors the payout logic
-   * of the withdraw transitions: in buffer mode (`covered_until > 0`) accrual
-   * is capped at the funded coverage window and the payout at the funded
-   * remainder.
+   * of the withdraw transitions: vesting accrues against the stream's full
+   * amount and the payout is capped at the funded remainder
+   * (`deposited_amount - withdrawn_amount`).
+   *
+   * `fullAmount` — the stream's total (from the receiver/sender ticket for
+   * private streams or the `payrolls` mapping for public ones). When omitted,
+   * it is fetched from `payrolls` for public streams; for private streams it
+   * falls back to `deposited_amount`, which understates accrued-but-unfunded
+   * amounts on buffer-mode streams.
    */
   async getWithdrawableAmounts(
     streamId: string | bigint,
     now: bigint = nowSeconds(),
+    fullAmount?: bigint,
   ): Promise<WithdrawableAmounts> {
     const anchor = await this.getStreamAnchor(streamId);
     const effectiveNow = anchor.paused ? anchor.lastPausedTime : now;
-    // Buffer mode: accrual stops at the funded coverage window.
-    const accrualTime =
-      anchor.coveredUntil > 0n && effectiveNow > anchor.coveredUntil
-        ? anchor.coveredUntil
-        : effectiveNow;
+    let base = fullAmount;
+    if (base === undefined) {
+      if (anchor.isPublic) {
+        base = (await this.getPayroll(streamId)).fullAmount;
+      } else {
+        // Private fallback without ticket access: cap at what is funded.
+        base = anchor.depositedAmount;
+      }
+    }
     const { totalWithdrawable, currentlyWithdrawable } = computeWithdrawableAmount(
-      accrualTime,
+      effectiveNow,
       anchor.startTime,
       anchor.duration,
       anchor.pausedInterval,
-      anchor.depositedAmount,
+      base,
       anchor.withdrawnAmount,
     );
-    // Buffer mode: payout is capped at the funded remainder.
+    // Payout is capped at the funded remainder.
     const available = anchor.depositedAmount - anchor.withdrawnAmount;
     return {
       totalWithdrawable,

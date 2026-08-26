@@ -46,7 +46,6 @@ export {
 export {
   computeStreamFee, // @deprecated
   computeAutoWithdrawalFee,
-  computeBufferCoverage,
   computeTopupAmount,
   computeWithdrawableAmount,
   isWithdrawFrequencyValid,

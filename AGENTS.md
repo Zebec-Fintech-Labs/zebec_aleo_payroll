@@ -187,14 +187,12 @@ Costs: storage (tx bytes), finalize (mapping ops), proof synthesis (per tx). Min
   needed amount; payroll tickets are identified by their `ticket_type` member
   (0 = sender, 1 = receiver, 2 = withdrawer; ported `matchesTicket` logic).
 - The only private key in the app is the admin attestation key input on the
-  Employer page, used solely for `signTokenPrice` (never persisted).
-- **Current status (app drift):** `app/src/payroll/WalletPayrollService.ts` and
-  its config module still use the old `TokenPrice` struct (6 fields with USD
-  prices) and pass a `feeBps` 9th input. The on-chain program now uses
-  `StreamTokenFee` (5 fields: `config`, `stream_token`, `stream_fee_amount`,
-  `expiry`, `nonce`) and the create entries take 8 / 5 inputs respectively. The
-  app cannot execute `create_stream_*` until re-synced. The SDK (`sdk/`) and CLI
-  scripts (`scripts/`) have been updated; the app update is a deferred task.
+  Employer page, used solely for `signStreamTokenFee` (never persisted).
+- **Current status (in sync):** the app uses the `StreamTokenFee` struct
+  (`config`, `stream_token`, `stream_fee_amount`, `expiry`, `nonce`) with
+  8 / 5 inputs on the create entries, matching the on-chain program. Anchor
+  serialization no longer carries `covered_until`; top-up debt math mirrors
+  the vested-vs-deposited model (`computeTopupAmount` in `sdk/math.ts`).
 <!-- END: Browser app -->
 
 <!-- BEGIN: Program architecture notes -->

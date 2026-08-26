@@ -86,24 +86,32 @@ export function computeWithdrawableAmount(
 }
 
 export interface TopupAmount {
-  /** Accrued debt in token units (stream seconds beyond `coveredUntil`). */
+  /** Accrued debt in token units: vested amount not yet deposited. */
   debtAmount: bigint;
-  /** Total amount to transfer: `debtAmount + extra`. */
+  /** Total amount to transfer: `debtAmount + acceptedExtra`. */
   topupAmount: bigint;
-  /** Additional covered seconds bought by `extra`. */
-  extraSeconds: bigint;
+  /**
+   * Portion of the requested `extra` that was accepted after the debt, capped
+   * so the combined deposit cannot exceed the stream total.
+   */
+  acceptedExtra: bigint;
 }
 
 /**
- * Mirror of the pause-aware debt math in `topup_stream_private` in
- * `main.leo`. Debt is measured in stream time (paused durations excluded);
- * the new on-chain `covered_until` becomes
- * `max(coveredUntil, streamTimeNow) + extraSeconds`.
+ * Mirror of the pause-aware debt math in `topup_stream_private` /
+ * `topup_stream_public` in `main.leo`. Debt is the vested amount (withdrawn
+ * amounts excluded) exceeding the deposited amount; extra pre-payment is
+ * capped so `deposited_amount + topup <= full_amount`.
  */
 export function computeTopupAmount(
   anchor: Pick<
     StreamAnchor,
-    "duration" | "paused" | "lastPausedTime" | "pausedInterval" | "coveredUntil"
+    | "startTime"
+    | "duration"
+    | "paused"
+    | "lastPausedTime"
+    | "pausedInterval"
+    | "depositedAmount"
   >,
   fullAmount: bigint,
   now: bigint,
@@ -116,12 +124,31 @@ export function computeTopupAmount(
     throw new Error("full amount must be positive");
   }
   const effectiveTime = anchor.paused ? anchor.lastPausedTime : now;
-  const streamTimeNow = effectiveTime - anchor.pausedInterval;
-  const debtSeconds =
-    streamTimeNow > anchor.coveredUntil ? streamTimeNow - anchor.coveredUntil : 0n;
-  const debtAmount = (debtSeconds * fullAmount) / anchor.duration;
-  const extraSeconds = (extra * anchor.duration) / fullAmount;
-  return { debtAmount, topupAmount: debtAmount + extra, extraSeconds };
+  const { totalWithdrawable: vestedAmount } = computeWithdrawableAmount(
+    effectiveTime,
+    anchor.startTime,
+    anchor.duration,
+    anchor.pausedInterval,
+    fullAmount,
+    0n,
+  );
+  const maxPossibleTopup =
+    anchor.depositedAmount < fullAmount
+      ? fullAmount - anchor.depositedAmount
+      : 0n;
+  const calculatedDebt = vestedAmount > anchor.depositedAmount
+    ? vestedAmount - anchor.depositedAmount
+    : 0n;
+  const debtAmount = calculatedDebt < maxPossibleTopup
+    ? calculatedDebt
+    : maxPossibleTopup;
+  const remainingCapacity = maxPossibleTopup - debtAmount;
+  const acceptedExtra = extra < remainingCapacity ? extra : remainingCapacity;
+  return {
+    debtAmount,
+    topupAmount: debtAmount + acceptedExtra,
+    acceptedExtra,
+  };
 }
 
 /** Current unix timestamp in seconds, as `bigint` (Leo `i64`). */
@@ -191,30 +218,3 @@ export const DEFAULT_WITHDRAW_FREQUENCY = 86_400n;
 
 /** Fee burned by `credits.aleo::split` (deducted from the change record). */
 export const SPLIT_FEE = 10_000n;
-
-/**
- * Mirror of `compute_buffer_coverage` in `main.leo`: the buffer-mode
- * `covered_until` timestamp of a freshly created stream (`0` when top-up mode
- * is disabled). `depositAmount` must be `<= fullAmount`, mirroring the
- * on-chain `assert_create_params`.
- */
-export function computeBufferCoverage(
-  depositAmount: bigint,
-  duration: bigint,
-  fullAmount: bigint,
-  startTime: bigint,
-  canTopup: boolean,
-): bigint {
-  if (!canTopup) return 0n;
-  if (fullAmount <= 0n) {
-    throw new Error("full amount must be positive");
-  }
-  if (duration <= 0n) {
-    throw new Error("duration must be positive");
-  }
-  if (depositAmount > fullAmount) {
-    throw new Error("initial buffer amount cannot exceed the stream amount");
-  }
-  const bufferSecs = (depositAmount * duration) / fullAmount;
-  return startTime + bufferSecs;
-}

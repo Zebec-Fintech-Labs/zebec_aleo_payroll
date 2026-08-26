@@ -3,7 +3,6 @@ import { describe, it } from "mocha";
 
 import {
   computeAutoWithdrawalFee,
-  computeBufferCoverage,
   computeStreamFee,
   computeTopupAmount,
   computeWithdrawableAmount,
@@ -76,50 +75,67 @@ describe("computeWithdrawableAmount", () => {
 });
 
 describe("computeTopupAmount", () => {
+  const START = 1_000n;
   const DURATION = 100n;
   const FULL = 10_000n; // 100 tokens per stream second
   const anchor = {
+    startTime: START,
     duration: DURATION,
     paused: false,
     lastPausedTime: 0n,
     pausedInterval: 0n,
-    coveredUntil: 1_050n, // covered through stream second 50
+    depositedAmount: 3_000n, // covered through stream second 30
   };
 
-  it("has no debt while stream time is within the covered window", () => {
+  it("has no debt while the deposit covers the vested amount", () => {
+    assert.deepEqual(
+      computeTopupAmount({ ...anchor, depositedAmount: 5_000n }, FULL, 1_050n, 0n),
+      { debtAmount: 0n, topupAmount: 0n, acceptedExtra: 0n },
+    );
+  });
+
+  it("accrues the vested amount beyond the deposit as debt", () => {
+    // Vested 5000 at t=1050 minus deposit 3000 -> 2000 debt.
     assert.deepEqual(computeTopupAmount(anchor, FULL, 1_050n, 0n), {
-      debtAmount: 0n,
-      topupAmount: 0n,
-      extraSeconds: 0n,
+      debtAmount: 2_000n,
+      topupAmount: 2_000n,
+      acceptedExtra: 0n,
     });
   });
 
-  it("accrues debt for stream time beyond covered_until", () => {
-    // 20 stream seconds past coverage at 100 tokens/sec.
-    assert.deepEqual(computeTopupAmount(anchor, FULL, 1_070n, 0n), {
-      debtAmount: 2_000n,
-      topupAmount: 2_000n,
-      extraSeconds: 0n,
+  it("caps total top-up so the deposit never exceeds the stream amount", () => {
+    // Stream fully elapsed: vested = FULL; debt capped at FULL - deposit.
+    assert.deepEqual(computeTopupAmount({ ...anchor, depositedAmount: 0n }, FULL, 9_999n, 0n), {
+      debtAmount: FULL,
+      topupAmount: FULL,
+      acceptedExtra: 0n,
     });
   });
 
   it("freezes debt while the stream is paused", () => {
-    // Paused at t=1060 with 10s of banked pause: stream time is 1050 -> no debt
-    // even though wall clock is far ahead.
+    // Paused at t=1060 with 10s of banked pause: stream time is 1050 -> same
+    // debt even though the wall clock is far ahead.
     const paused = { ...anchor, paused: true, lastPausedTime: 1_060n, pausedInterval: 10n };
     assert.deepEqual(computeTopupAmount(paused, FULL, 9_999n, 0n), {
-      debtAmount: 0n,
-      topupAmount: 0n,
-      extraSeconds: 0n,
+      debtAmount: 2_000n,
+      topupAmount: 2_000n,
+      acceptedExtra: 0n,
     });
   });
 
-  it("adds extra pre-payment and buys extra covered seconds", () => {
-    // 500 extra tokens at 100 tokens/sec buy 5 extra seconds.
-    assert.deepEqual(computeTopupAmount(anchor, FULL, 1_070n, 500n), {
-      debtAmount: 2_000n,
-      topupAmount: 2_500n,
-      extraSeconds: 5n,
+  it("adds extra pre-payment up to the remaining capacity", () => {
+    // Deposit 9000 covers the vested 7000 at t=1070; capacity is 1000, so a
+    // larger extra request is truncated to 1000.
+    const funded = { ...anchor, depositedAmount: 9_000n };
+    assert.deepEqual(computeTopupAmount(funded, FULL, 1_070n, 500n), {
+      debtAmount: 0n,
+      topupAmount: 500n,
+      acceptedExtra: 500n,
+    });
+    assert.deepEqual(computeTopupAmount(funded, FULL, 1_070n, 2_000n), {
+      debtAmount: 0n,
+      topupAmount: 1_000n,
+      acceptedExtra: 1_000n,
     });
   });
 
@@ -164,25 +180,5 @@ describe("isWithdrawFrequencyValid", () => {
   it("rejects other values", () => {
     assert.equal(isWithdrawFrequencyValid(61n), false);
     assert.equal(isWithdrawFrequencyValid(0n), false);
-  });
-});
-
-describe("computeBufferCoverage", () => {
-  it("returns 0 when top-up mode is disabled", () => {
-    assert.equal(computeBufferCoverage(5_000n, 100n, 10_000n, 1_000n, false), 0n);
-  });
-
-  it("covers the proportional buffer window", () => {
-    // Half the amount up front covers half the duration.
-    assert.equal(computeBufferCoverage(5_000n, 100n, 10_000n, 1_000n, true), 1_050n);
-  });
-
-  it("truncates like integer division", () => {
-    // 1/3 of the amount over a 100s duration -> 33 covered seconds.
-    assert.equal(computeBufferCoverage(3_333n, 100n, 10_000n, 1_000n, true), 1_033n);
-  });
-
-  it("rejects a buffer larger than the stream amount", () => {
-    assert.throws(() => computeBufferCoverage(10_001n, 100n, 10_000n, 1_000n, true));
   });
 });

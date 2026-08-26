@@ -159,7 +159,6 @@ function sampleAnchor(): StreamAnchor {
     canceled: false,
     canceledAt: 0n,
     depositedAmount: 1_000_000n,
-    coveredUntil: 0n,
     lastPausedTime: 0n,
     pausedInterval: 0n,
     withdrawnAmount: 500_000n,

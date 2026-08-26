@@ -402,12 +402,15 @@ export default function EmployerPage({ payroll }: { payroll: UsePayroll }) {
   };
 
   // ---- Top-up (private + public) ----
+  // A stream can be topped up while it is top-up-enabled, not canceled, and
+  // not yet fully funded (deposit below the stream total).
   const topupablePrivate = streams.filter(
     (s) =>
       s.anchor !== undefined &&
       !s.anchor.canceled &&
-      s.anchor.coveredUntil > 0n &&
-      s.canTopup === true,
+      s.canTopup === true &&
+      s.fullAmount !== undefined &&
+      s.anchor.depositedAmount < s.fullAmount,
   );
   const topupablePublic = knownStreams.filter(
     (s) =>
@@ -416,7 +419,7 @@ export default function EmployerPage({ payroll }: { payroll: UsePayroll }) {
       s.payroll.canTopup &&
       s.anchor !== undefined &&
       !s.anchor.canceled &&
-      s.anchor.coveredUntil > 0n,
+      s.anchor.depositedAmount < s.payroll.fullAmount,
   );
 
   /** Human-readable quote of what the top-up will pull: debt + extra. */
@@ -427,15 +430,14 @@ export default function EmployerPage({ payroll }: { payroll: UsePayroll }) {
   ): string {
     if (fullAmount === undefined || anchor === undefined || extra < 0n) return "—";
     try {
-      const { debtAmount, topupAmount, extraSeconds } = computeTopupAmount(
+      const { debtAmount, topupAmount, acceptedExtra } = computeTopupAmount(
         anchor,
         fullAmount,
         nowSeconds(),
         extra,
       );
       return (
-        `debt ${debtAmount} + extra ${extra} = ${topupAmount} token units` +
-        ` (buys ${extraSeconds}s of coverage)`
+        `debt ${debtAmount} + accepted extra ${acceptedExtra} of ${extra} = ${topupAmount} token units`
       );
     } catch {
       return "—";
@@ -720,7 +722,7 @@ export default function EmployerPage({ payroll }: { payroll: UsePayroll }) {
           busy={busy}
           options={topupablePrivate.map((s) => ({
             streamId: s.streamId,
-            label: `${s.streamId}field · covered until ${s.anchor!.coveredUntil}`,
+            label: `${s.streamId}field · deposited ${s.anchor!.depositedAmount} of ${s.fullAmount}`,
           }))}
           selected={selectedPrivateTopup}
           onSelect={setSelectedPrivateTopup}
@@ -1018,7 +1020,7 @@ export default function EmployerPage({ payroll }: { payroll: UsePayroll }) {
           busy={busy}
           options={topupablePublic.map((s) => ({
             streamId: s.streamId,
-            label: `${s.streamId} · covered until ${s.anchor!.coveredUntil}`,
+            label: `${s.streamId} · deposited ${s.anchor!.depositedAmount} of ${s.payroll!.fullAmount}`,
           }))}
           selected={selectedPublicTopup}
           onSelect={setSelectedPublicTopup}
