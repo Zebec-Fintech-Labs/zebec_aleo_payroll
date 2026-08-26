@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 import path from "node:path";
 import * as fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import { configNameToField, PayrollClient } from "../sdk/index.js";
+import { configNameToField, StreamClient } from "../sdk/index.js";
 import { setTimeout } from "node:timers/promises";
 
 dotenv.config();
@@ -21,18 +21,18 @@ const HOST = "https://api.explorer.provable.com/v1";
 const here = path.dirname(fileURLToPath(import.meta.url));
 console.log("Current directory:", here);
 const PROGRAM_SOURCE = fs.readFileSync(
-    path.resolve(here, "../build/test_zebec_payroll_v9/test_zebec_payroll_v9.aleo"),
+    path.resolve(here, "../build/test_zebec_stream_v1/test_zebec_stream_v1.aleo"),
     "utf8",
 );
 
-const client = new PayrollClient({
+const client = new StreamClient({
     host: HOST,
     privateKey: PRIVATE_KEY,
     programSource: PROGRAM_SOURCE,
 });
 const admin = client.account!.address().to_string();
 console.log("Admin address:", admin);
-const CONFIG_NAME = configNameToField(`Payroll_Config_001`);
+const CONFIG_NAME = configNameToField(`Stream_Config_001`);
 
 async function waitForConfirmation(txId: string) {
     const confirmation = await client.networkClient.waitForTransactionConfirmation(txId, 2_000, 60_000);
@@ -42,7 +42,7 @@ async function waitForConfirmation(txId: string) {
     }
 }
 
-async function initializePayrollConfig() {
+async function initializeStreamConfig() {
     const FEE_VAULT = admin;
     const WITHDRAWER = admin;
     const BASE_FEE = 10_000n;
@@ -54,11 +54,11 @@ async function initializePayrollConfig() {
     console.log("Config Initialization transaction ID:", txId);
     await waitForConfirmation(txId);
     await setTimeout(10000);
-    const config = await client.getPayrollConfig(CONFIG_NAME);
+    const config = await client.getStreamConfig(CONFIG_NAME);
     console.log("Initialized config:", config);
 }
 
-async function updatePayrollConfig() {
+async function updateStreamConfig() {
     const FEE_VAULT = admin;
     const WITHDRAWER = admin;
     const BASE_FEE = 100_000n;
@@ -69,7 +69,7 @@ async function updatePayrollConfig() {
     });
     console.log("Config Update transaction ID:", txId);
     await waitForConfirmation(txId);
-    const config = await client.getPayrollConfig(CONFIG_NAME);
+    const config = await client.getStreamConfig(CONFIG_NAME);
     console.log("Updated config:", config);
 }
 
@@ -90,8 +90,8 @@ async function whitelistTokens() {
 }
 
 async function main() {
-    await initializePayrollConfig();
-    // await updatePayrollConfig();
+    await initializeStreamConfig();
+    // await updateStreamConfig();
     await whitelistTokens();
 }
 

@@ -1,9 +1,9 @@
 /**
- * Payroll stream lifecycle script: create -> pause -> resume -> withdraw ->
- * cancel, against the `test_zebec_payroll_v9.aleo` program on testnet.
+ * Stream stream lifecycle script: create -> pause -> resume -> withdraw ->
+ * cancel, against the `test_zebec_stream_v1.aleo` program on testnet.
  *
  * Prerequisites:
- * - Config `Payroll_Config_001` initialized (run `npm run admin` first) and
+ * - Config `Stream_Config_001` initialized (run `npm run admin` first) and
  *   `test_usdcx_stablecoin` whitelisted.
  * - The employer account (`PRIVATE_KEY`) must hold unspent
  *   `test_usdcx_stablecoin.aleo` Token records covering the stream deposit and
@@ -31,7 +31,7 @@ import {
     configNameToField,
     DEFAULT_FEE_BPS,
     nowSeconds,
-    PayrollClient,
+    StreamClient,
     PROGRAM_ID,
     signStreamTokenFee,
     type Config,
@@ -71,7 +71,7 @@ const FREEZE_LIST_URL =
 const here = path.dirname(fileURLToPath(import.meta.url));
 // console.log("Current directory:", here);
 const PROGRAM_SOURCE = fs.readFileSync(
-    path.resolve(here, "../build/test_zebec_payroll_v9/test_zebec_payroll_v9.aleo"),
+    path.resolve(here, "../build/test_zebec_stream_v1/test_zebec_stream_v1.aleo"),
     "utf8",
 );
 
@@ -82,7 +82,7 @@ if (PROVER_URI) {
     console.log("Using delegated proving service:", PROVER_URI);
 }
 
-const senderClient = new PayrollClient({
+const senderClient = new StreamClient({
     host: HOST,
     privateKey: SENDER_PRIVATE_KEY,
     programSource: PROGRAM_SOURCE,
@@ -90,7 +90,7 @@ const senderClient = new PayrollClient({
     proverApiKey: PROVER_API_KEY,
     proverConsumerId: PROVER_CONSUMER_ID,
 });
-const receiverClient = new PayrollClient({
+const receiverClient = new StreamClient({
     host: HOST,
     privateKey: RECEIVER_PRIVATE_KEY,
     programSource: PROGRAM_SOURCE,
@@ -108,7 +108,7 @@ if (sender === receiver) {
     process.exit(1);
 }
 
-const CONFIG_NAME = configNameToField("Payroll_Config_001");
+const CONFIG_NAME = configNameToField("Stream_Config_001");
 const TOKEN_PROGRAM = "test_usdcx_stablecoin";
 const TOKEN_PRICE_USD = 1_000_000n; // $1.00 per token, 6 decimals (used for off-chain fee quote only)
 const ALEO_PRICE_USD = 200_000n;  // $0.20 per ALEO, 6 decimals (used for off-chain fee quote only)
@@ -144,9 +144,9 @@ async function waitForConfirmation(txId: string) {
     }
 }
 
-/** Read the on-chain payroll config and shape it as the `Config` input. */
+/** Read the on-chain stream config and shape it as the `Config` input. */
 async function getConfigInput(): Promise<Config> {
-    const chainConfig = await senderClient.getPayrollConfig(CONFIG_NAME);
+    const chainConfig = await senderClient.getStreamConfig(CONFIG_NAME);
     return {
         configName: CONFIG_NAME,
         admin: chainConfig.admin,
@@ -235,7 +235,7 @@ async function createStreamPublic(): Promise<string | bigint> {
     const { tokenFee, signature } = createSignedTokenFee(params.amount);
     console.log(`Public stream fee: ${tokenFee.streamFeeAmount} microcredits`);
     // `create_stream_public` pulls the deposit via `transfer_from_public`,
-    // which requires this payroll program to be approved as the spender first.
+    // which requires this stream program to be approved as the spender first.
     // Check the on-chain allowance and approve if it is too low.
     const depositAmount = params.canTopup ? params.initialBufferAmount : params.amount;
     const programAddress = Address.fromProgramId(PROGRAM_ID).toString();
@@ -254,7 +254,7 @@ async function createStreamPublic(): Promise<string | bigint> {
         );
         const approveTxId = await tokenService.approve(programAddress, depositAmount, { priorityFee: 0.1 });
         await waitForConfirmation(approveTxId);
-        console.log("Approved payroll program to spend tokens:", approveTxId);
+        console.log("Approved stream program to spend tokens:", approveTxId);
     } else {
         console.log(`Allowance ${allowance} already covers deposit ${depositAmount}; no approval needed.`);
     }
@@ -271,9 +271,9 @@ async function createStreamPublic(): Promise<string | bigint> {
     await waitForConfirmation(txId);
     await setTimeout(60000);
     const anchor = await senderClient.getStreamAnchor(params.streamId);
-    const payroll = await senderClient.getPayroll(params.streamId);
+    const stream = await senderClient.getStream(params.streamId);
     console.log("Created public stream anchor:", anchor);
-    console.log("Created public stream payroll:", payroll);
+    console.log("Created public stream stream:", stream);
     return params.streamId;
 }
 
@@ -400,7 +400,7 @@ async function main() {
     }
     end = Date.now();
     console.log(`Stream cancel took ${(end - start) / 1000} seconds`);
-    console.log("Payroll stream lifecycle completed successfully.");
+    console.log("Stream stream lifecycle completed successfully.");
     console.log("Stream created with ID:", streamId);
 }
 
