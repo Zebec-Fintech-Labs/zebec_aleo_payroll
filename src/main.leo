@@ -78,6 +78,14 @@ struct WhitelistKey {
     token_program: identifier,
 }
 
+// One slot of a per-address stream registry. Hashed with BHP256 to form the
+// `outgoing_stream_refs` / `incoming_stream_refs` mapping keys so streams can
+// be listed per sender/receiver (public streams only).
+struct StreamRefKey {
+    account: address,
+    index: u64,
+}
+
 // Program configuration. Multiple configs live in this program's
 // `payroll_configs` mapping, each under a unique config name. Whitelisted
 // tokens are stored per config in the `whitelisted_token_programs` mapping
@@ -214,6 +222,14 @@ program test_zebec_payroll_v9.aleo {
     mapping payrolls: field => Payroll;
     // Map of token-fee nonce => used; prevents signed-fee replay.
     mapping token_fee_nonces: field => bool;
+    // Number of public streams ever created by each sender.
+    mapping outgoing_stream_counts: address => u64;
+    // Number of public streams ever received by each receiver.
+    mapping incoming_stream_counts: address => u64;
+    // BHP256(StreamRefKey { account, index }) => stream_id (sender registry).
+    mapping outgoing_stream_refs: field => field;
+    // BHP256(StreamRefKey { account, index }) => stream_id (receiver registry).
+    mapping incoming_stream_refs: field => field;
 
     // Sender payroll ticket — authorizes pause/resume/topup/cancel operations.
     record SenderPayrollTicket {
@@ -880,7 +896,24 @@ program test_zebec_payroll_v9.aleo {
                 initialized: true,
             };
             payrolls.set(params.stream_id, payroll);
-            
+
+            // Append the stream to the sender's and receiver's public stream
+            // registries (append-only; canceled streams are filtered
+            // client-side via the anchor state).
+            let out_idx: u64 = outgoing_stream_counts.get_or_use(caller, 0u64);
+            outgoing_stream_refs.set(
+                BHP256::hash_to_field(StreamRefKey { account: caller, index: out_idx }),
+                params.stream_id,
+            );
+            outgoing_stream_counts.set(caller, out_idx + 1u64);
+
+            let in_idx: u64 = incoming_stream_counts.get_or_use(params.receiver, 0u64);
+            incoming_stream_refs.set(
+                BHP256::hash_to_field(StreamRefKey { account: params.receiver, index: in_idx }),
+                params.stream_id,
+            );
+            incoming_stream_counts.set(params.receiver, in_idx + 1u64);
+
             f_stream_fee_transfer.run();
             f_auto_withdrawal_fee_transfer.run();
             f_deposit_transfer.run();
@@ -1245,6 +1278,35 @@ program test_zebec_payroll_v9.aleo {
     view fn get_stream_anchor(stream_id: field) -> StreamAnchor {
         assert(stream_anchors.contains(stream_id));
         return stream_anchors.get(stream_id);
+    }
+
+    // =========================================================================
+    // Views: per-address public stream registries
+    // =========================================================================
+
+    // Number of public streams ever created by `account`. Iterate
+    // `get_outgoing_stream_ref(account, 0..count)` to list them.
+    view fn get_outgoing_stream_count(account: address) -> u64 {
+        return outgoing_stream_counts.get_or_use(account, 0u64);
+    }
+
+    // Number of public streams ever received by `account`.
+    view fn get_incoming_stream_count(account: address) -> u64 {
+        return incoming_stream_counts.get_or_use(account, 0u64);
+    }
+
+    // The stream id at slot `index` of `account`'s outgoing registry, or
+    // `0field` when the slot does not exist.
+    view fn get_outgoing_stream_ref(account: address, index: u64) -> field {
+        let key: field = BHP256::hash_to_field(StreamRefKey { account: account, index: index });
+        return outgoing_stream_refs.get_or_use(key, 0field);
+    }
+
+    // The stream id at slot `index` of `account`'s incoming registry, or
+    // `0field` when the slot does not exist.
+    view fn get_incoming_stream_ref(account: address, index: u64) -> field {
+        let key: field = BHP256::hash_to_field(StreamRefKey { account: account, index: index });
+        return incoming_stream_refs.get_or_use(key, 0field);
     }
 
     // =========================================================================
