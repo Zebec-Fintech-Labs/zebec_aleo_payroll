@@ -84,8 +84,8 @@ describe("hashing — whitelisted_token_programs mapping key", () => {
 
 describe("configNameToField", () => {
   it("is deterministic and returns a canonical field literal", () => {
-    const a = configNameToField("zebec-payroll");
-    assert.equal(a, configNameToField("zebec-payroll"));
+    const a = configNameToField("zebec-stream");
+    assert.equal(a, configNameToField("zebec-stream"));
     assert.match(a, /^\d+field$/);
     assert.notEqual(a, configNameToField("other-name"));
   });

@@ -11,7 +11,7 @@
  * Environment variables:
  * - ZEBEC_TEST_PRIVATE_KEY (required): funded testnet private key.
  * - ZEBEC_TEST_HOST (optional): API host, defaults to the testnet explorer.
- * - ZEBEC_DEPLOY=1 (optional): deploy `test_zebec_payroll_v9.aleo` first when it is
+ * - ZEBEC_DEPLOY=1 (optional): deploy `test_zebec_stream_v1.aleo` first when it is
  *   not found on the network (costs a deployment fee).
  *
  * Stream-lifecycle transactions (create/pause/withdraw/cancel) are not
@@ -28,7 +28,7 @@ import { describe, it } from "mocha";
 
 import {
   configNameToField,
-  PayrollClient,
+  StreamClient,
   DEFAULT_ENDPOINT,
 } from "../../sdk/index.js";
 
@@ -45,7 +45,7 @@ const HOST = process.env.ENDPOINT ?? DEFAULT_ENDPOINT;
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 const PROGRAM_SOURCE = readFileSync(
-  path.resolve(here, "../../build/test_zebec_payroll_v9/test_zebec_payroll_v9.aleo"),
+  path.resolve(here, "../../build/test_zebec_stream_v1/test_zebec_stream_v1.aleo"),
   "utf8",
 );
 
@@ -62,7 +62,7 @@ describe("testnet integration: admin lifecycle", function () {
 
   this.timeout(600_000);
 
-  const client = new PayrollClient({
+  const client = new StreamClient({
     host: HOST,
     privateKey: PRIVATE_KEY,
     programSource: PROGRAM_SOURCE,
@@ -74,10 +74,10 @@ describe("testnet integration: admin lifecycle", function () {
     await client.networkClient.waitForTransactionConfirmation(txId);
   }
 
-  it("initializes a payroll config", async () => {
+  it("initializes a stream config", async () => {
     const txId = await client.initializeConfig(CONFIG_NAME, admin, admin, 1_000n, 2_000n);
     await waitForConfirmation(txId);
-    const config = await client.getPayrollConfig(CONFIG_NAME);
+    const config = await client.getStreamConfig(CONFIG_NAME);
     assert.equal(config.admin, admin);
     assert.equal(config.feeVault, admin);
     assert.equal(config.withdrawer, admin);
@@ -99,7 +99,7 @@ describe("testnet integration: admin lifecycle", function () {
   it("updates the config", async () => {
     const txId = await client.updateConfig(CONFIG_NAME, admin, admin, 3_000n, 4_000n);
     await waitForConfirmation(txId);
-    const config = await client.getPayrollConfig(CONFIG_NAME);
+    const config = await client.getStreamConfig(CONFIG_NAME);
     assert.equal(config.baseFee, 3_000n);
     assert.equal(config.platformFee, 4_000n);
   });

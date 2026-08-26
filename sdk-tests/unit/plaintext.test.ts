@@ -9,8 +9,8 @@ import {
   identLiteral,
   merkleProofToPlaintext,
   merkleProofsToPlaintext,
-  parsePayroll,
-  parsePayrollConfig,
+  parseStream,
+  parseStreamConfig,
   parseBoolLiteral,
   parseFieldLiteral,
   parseIdentLiteral,
@@ -20,11 +20,11 @@ import {
   parseStreamAnchor,
   parseStructMembers,
   parseWithdrawerTicket,
-  payrollToPlaintext,
+  streamToPlaintext,
   streamAnchorToPlaintext,
   streamTokenFeeToPlaintext,
 } from "../../sdk/plaintext.js";
-import type { Payroll, StreamAnchor } from "../../sdk/types.js";
+import type { Stream, StreamAnchor } from "../../sdk/types.js";
 
 const RECEIVER = "aleo1ezamst4pjgj9zfxqq0fwfj8a4cjuqndmasgata3hggzqygggnyfq6kmyd4";
 const ADMIN = "aleo129nrpl0dxh4evdsan3f4lyhz5pdgp6klrn5atp37ejlavswx5czsk0j5dj";
@@ -120,8 +120,8 @@ describe("struct serializers", () => {
     assert.throws(() => merkleProofToPlaintext({ siblings: [1n], leafIndex: 0 }));
   });
 
-  it("serializes Payroll with member order matching the Leo struct declaration and parses as Plaintext", () => {
-    const text = payrollToPlaintext(samplePayroll());
+  it("serializes Stream with member order matching the Leo struct declaration and parses as Plaintext", () => {
+    const text = streamToPlaintext(sampleStream());
     assert.equal(
       text,
       `{ stream_id: 42field, config: 7field, sender: ${ADMIN}, receiver: ${RECEIVER}, ` +
@@ -133,7 +133,7 @@ describe("struct serializers", () => {
   });
 });
 
-function samplePayroll(): Payroll {
+function sampleStream(): Stream {
   return {
     streamId: "42field",
     config: "7field",
@@ -195,7 +195,7 @@ describe("parsers", () => {
   platform_fee: 2000u64,
   initialized: true
 }`;
-    assert.deepEqual(parsePayrollConfig(value), {
+    assert.deepEqual(parseStreamConfig(value), {
       admin: ADMIN,
       feeVault: RECEIVER,
       withdrawer: RECEIVER,
@@ -214,12 +214,12 @@ describe("parsers", () => {
     assert.equal(members.get("d"), "true");
   });
 
-  it("round-trips a Payroll through serialize/parse", () => {
-    const payroll = samplePayroll();
-    assert.deepEqual(parsePayroll(payrollToPlaintext(payroll)), payroll);
+  it("round-trips a Stream through serialize/parse", () => {
+    const stream = sampleStream();
+    assert.deepEqual(parseStream(streamToPlaintext(stream)), stream);
   });
 
-  it("parses a Payroll mapping value with multi-line formatting", () => {
+  it("parses a Stream mapping value with multi-line formatting", () => {
     const value = `{
       stream_id: 42field,
       config: 7field,
@@ -234,7 +234,7 @@ describe("parsers", () => {
       topup_count: 1u64,
       initialized: true
     }`;
-    assert.deepEqual(parsePayroll(value), samplePayroll());
+    assert.deepEqual(parseStream(value), sampleStream());
   });
 });
 
