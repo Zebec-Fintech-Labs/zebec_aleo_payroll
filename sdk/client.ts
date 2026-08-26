@@ -1,5 +1,5 @@
 /**
- * `PayrollClient` — high-level interface to the `test_zebec_payroll_v9.aleo` program:
+ * `StreamClient` — high-level interface to the `test_zebec_stream_v1.aleo` program:
  * stream lifecycle operations, admin configuration, and mapping reads.
  */
 
@@ -28,13 +28,13 @@ import {
   parseBoolLiteral,
   parseFieldLiteral,
   parseIntLiteral,
-  parsePayroll,
-  parsePayrollConfig,
+  parseStream,
+  parseStreamConfig,
   parseReceiverTicket,
   parseSenderTicket,
   parseStreamAnchor,
   parseWithdrawerTicket,
-  payrollToPlaintext,
+  streamToPlaintext,
   streamAnchorToPlaintext,
   streamTokenFeeToPlaintext,
 } from "./plaintext.js";
@@ -45,9 +45,9 @@ import type {
   ExecuteOptions,
   ListedStream,
   MerkleProof,
-  Payroll,
-  PayrollClientOptions as PayrollServiceOptions,
-  PayrollConfig,
+  Stream,
+  StreamClientOptions as StreamServiceOptions,
+  StreamConfig,
   StreamAnchor,
   StreamTokenFee,
 } from "./types.js";
@@ -55,9 +55,9 @@ import type { WithdrawableAmounts } from "./math.js";
 import type { TicketRecordName } from "./records.js";
 
 export const DEFAULT_ENDPOINT = "https://api.explorer.provable.com/v1";
-export const PROGRAM_ID = "test_zebec_payroll_v9.aleo";
+export const PROGRAM_ID = "test_zebec_stream_v1.aleo";
 
-export class PayrollService {
+export class StreamService {
   readonly programId: string;
   readonly networkClient: AleoNetworkClient;
   readonly programManager: ProgramManager;
@@ -71,7 +71,7 @@ export class PayrollService {
   private readonly proverConsumerId?: string;
   private readonly programSourceCache = new Map<string, string>();
 
-  constructor(options: PayrollServiceOptions = {}) {
+  constructor(options: StreamServiceOptions = {}) {
     const host = options.host ?? DEFAULT_ENDPOINT;
     this.programId = options.programId ?? PROGRAM_ID;
     this.networkClient = new AleoNetworkClient(host);
@@ -177,7 +177,7 @@ export class PayrollService {
     ticket?: string | RecordPlaintext,
     options: ExecuteOptions = {},
   ): Promise<string> {
-    const ticketRecord = ticket?.toString() ?? (await this.findTicket("SenderPayrollTicket", streamId));
+    const ticketRecord = ticket?.toString() ?? (await this.findTicket("SenderStreamTicket", streamId));
     return this.execute("pause_resume_stream_private", [ticketRecord], options);
   }
 
@@ -191,7 +191,7 @@ export class PayrollService {
     ticket?: string | RecordPlaintext,
     options: ExecuteOptions = {},
   ): Promise<string> {
-    const ticketRecord = ticket?.toString() ?? (await this.findTicket("SenderPayrollTicket", streamId));
+    const ticketRecord = ticket?.toString() ?? (await this.findTicket("SenderStreamTicket", streamId));
     const senderTicket = parseSenderTicket(ticketRecord);
     const anchor = await this.getStreamAnchor(streamId);
     const inputs = [ticketRecord, streamAnchorToPlaintext(anchor), `${now}i64`];
@@ -208,7 +208,7 @@ export class PayrollService {
     ticket?: string | RecordPlaintext,
     options: ExecuteOptions = {},
   ): Promise<string> {
-    const ticketRecord = ticket?.toString() ?? (await this.findTicket("ReceiverPayrollTicket", streamId));
+    const ticketRecord = ticket?.toString() ?? (await this.findTicket("ReceiverStreamTicket", streamId));
     const receiverTicket = parseReceiverTicket(ticketRecord);
     const anchor = await this.getStreamAnchor(streamId);
     const inputs = [ticketRecord, streamAnchorToPlaintext(anchor), `${now}i64`];
@@ -228,7 +228,7 @@ export class PayrollService {
     options: ExecuteOptions = {},
   ): Promise<string> {
     const ticketRecord =
-      ticket?.toString() ?? (await this.findTicket("WithdrawerPayrollTicket", streamId));
+      ticket?.toString() ?? (await this.findTicket("WithdrawerStreamTicket", streamId));
     const withdrawerTicket = parseWithdrawerTicket(ticketRecord);
     const anchor = await this.getStreamAnchor(streamId);
     const inputs = [
@@ -260,7 +260,7 @@ export class PayrollService {
     } = {},
   ): Promise<string> {
     const ticketRecord =
-      options.ticket?.toString() ?? (await this.findTicket("SenderPayrollTicket", streamId));
+      options.ticket?.toString() ?? (await this.findTicket("SenderStreamTicket", streamId));
     const senderTicket = parseSenderTicket(ticketRecord);
     const anchor = await this.getStreamAnchor(streamId);
     const tokenProgramId = `${senderTicket.tokenProgram}.aleo`;
@@ -311,7 +311,7 @@ export class PayrollService {
 
   /**
    * Execute `pause_resume_stream_public` (toggles pause/resume). The signer
-   * must be the payroll's sender; only the stream id is needed as input.
+   * must be the stream's sender; only the stream id is needed as input.
    */
   async pauseResumeStreamPublic(
     streamId: string | bigint,
@@ -321,48 +321,48 @@ export class PayrollService {
   }
 
   /**
-   * Execute `cancel_stream_public`. The payroll (`payrolls` mapping) and the
+   * Execute `cancel_stream_public`. The stream (`streams` mapping) and the
    * on-chain anchor are resolved automatically when omitted. The signer must
-   * be the payroll's sender.
+   * be the stream's sender.
    */
   async cancelStreamPublic(
     streamId: string | bigint,
     now: bigint = nowSeconds(),
-    payroll?: Payroll,
+    stream?: Stream,
     options: ExecuteOptions = {},
   ): Promise<string> {
-    const payrollValue = payroll ?? (await this.getPayroll(streamId));
+    const streamValue = stream ?? (await this.getStream(streamId));
     const anchor = await this.getStreamAnchor(streamId);
     const inputs = [
-      payrollToPlaintext(payrollValue),
+      streamToPlaintext(streamValue),
       streamAnchorToPlaintext(anchor),
       `${now}i64`,
     ];
-    const tokenProgramId = `${payrollValue.tokenProgram}.aleo`;
+    const tokenProgramId = `${streamValue.tokenProgram}.aleo`;
     return this.execute("cancel_stream_public", inputs, options, {
       [tokenProgramId]: await this.loadProgramSource(tokenProgramId),
     });
   }
 
   /**
-   * Execute `withdraw_stream_public`. The payroll (`payrolls` mapping) and the
+   * Execute `withdraw_stream_public`. The stream (`streams` mapping) and the
    * on-chain anchor are resolved automatically when omitted. The signer must
-   * be the payroll's receiver.
+   * be the stream's receiver.
    */
   async withdrawPublic(
     streamId: string | bigint,
     now: bigint = nowSeconds(),
-    payroll?: Payroll,
+    stream?: Stream,
     options: ExecuteOptions = {},
   ): Promise<string> {
-    const payrollValue = payroll ?? (await this.getPayroll(streamId));
+    const streamValue = stream ?? (await this.getStream(streamId));
     const anchor = await this.getStreamAnchor(streamId);
     const inputs = [
-      payrollToPlaintext(payrollValue),
+      streamToPlaintext(streamValue),
       streamAnchorToPlaintext(anchor),
       `${now}i64`,
     ];
-    const tokenProgramId = `${payrollValue.tokenProgram}.aleo`;
+    const tokenProgramId = `${streamValue.tokenProgram}.aleo`;
     return this.execute("withdraw_stream_public", inputs, options, {
       [tokenProgramId]: await this.loadProgramSource(tokenProgramId),
     });
@@ -371,33 +371,33 @@ export class PayrollService {
   /**
    * Execute `topup_stream_public`: pay the accrued debt of a buffer-mode
    * public stream plus `extra` pre-paid coverage. The signer must be the
-   * payroll's sender and must have approved this program on the token (the
+   * stream's sender and must have approved this program on the token (the
    * deposit is pulled from the signer's public balance via
-   * `IARC22::transfer_from_public`). The payroll and on-chain anchor are
+   * `IARC22::transfer_from_public`). The stream and on-chain anchor are
    * resolved automatically when omitted.
    */
   async topupStreamPublic(
     streamId: string | bigint,
     extra: bigint,
     now: bigint = nowSeconds(),
-    payroll?: Payroll,
+    stream?: Stream,
     options: ExecuteOptions = {},
   ): Promise<string> {
-    const payrollValue = payroll ?? (await this.getPayroll(streamId));
+    const streamValue = stream ?? (await this.getStream(streamId));
     const anchor = await this.getStreamAnchor(streamId);
     // Fail fast when there is nothing to pay: the on-chain entry asserts
     // `debt_amount + extra > 0` with the same pause-aware debt math.
-    const { topupAmount } = computeTopupAmount(anchor, payrollValue.fullAmount, now, extra);
+    const { topupAmount } = computeTopupAmount(anchor, streamValue.fullAmount, now, extra);
     if (topupAmount <= 0n) {
       throw new Error("top-up amount is zero: no accrued debt and no extra pre-payment");
     }
     const inputs = [
-      payrollToPlaintext(payrollValue),
+      streamToPlaintext(streamValue),
       streamAnchorToPlaintext(anchor),
       `${extra}u128`,
       `${now}i64`,
     ];
-    const tokenProgramId = `${payrollValue.tokenProgram}.aleo`;
+    const tokenProgramId = `${streamValue.tokenProgram}.aleo`;
     return this.execute("topup_stream_public", inputs, options, {
       [tokenProgramId]: await this.loadProgramSource(tokenProgramId),
     });
@@ -406,25 +406,25 @@ export class PayrollService {
   /**
    * Execute `withdraw_stream_auto_public`: pay out the receiver's accrued
    * amount on behalf of the receiver. Withdrawer only — the signer must be
-   * the config's withdrawer. The payroll and on-chain anchor are resolved
+   * the config's withdrawer. The stream and on-chain anchor are resolved
    * automatically when omitted.
    */
   async withdrawAutoPublic(
     streamId: string | bigint,
     config: Config,
     now: bigint = nowSeconds(),
-    payroll?: Payroll,
+    stream?: Stream,
     options: ExecuteOptions = {},
   ): Promise<string> {
-    const payrollValue = payroll ?? (await this.getPayroll(streamId));
+    const streamValue = stream ?? (await this.getStream(streamId));
     const anchor = await this.getStreamAnchor(streamId);
     const inputs = [
-      payrollToPlaintext(payrollValue),
+      streamToPlaintext(streamValue),
       configToPlaintext(config),
       streamAnchorToPlaintext(anchor),
       `${now}i64`,
     ];
-    const tokenProgramId = `${payrollValue.tokenProgram}.aleo`;
+    const tokenProgramId = `${streamValue.tokenProgram}.aleo`;
     return this.execute("withdraw_stream_auto_public", inputs, options, {
       [tokenProgramId]: await this.loadProgramSource(tokenProgramId),
     });
@@ -501,34 +501,34 @@ export class PayrollService {
     return parseStreamAnchor(value);
   }
 
-  /** Read and parse `payrolls[streamId]` (public streams only). */
-  async getPayroll(streamId: string | bigint): Promise<Payroll> {
+  /** Read and parse `streams[streamId]` (public streams only). */
+  async getStream(streamId: string | bigint): Promise<Stream> {
     const value = await this.networkClient.getProgramMappingValue(
       this.programId,
-      "payrolls",
+      "streams",
       fieldLiteral(streamId),
     );
 
     if (!value) {
-      throw new Error(`Could not fetch payroll for stream Id: ${streamId}`)
+      throw new Error(`Could not fetch stream for stream Id: ${streamId}`)
     }
 
-    return parsePayroll(value);
+    return parseStream(value);
   }
 
-  /** Read and parse `payroll_config[configName]`. */
-  async getPayrollConfig(configName: string | bigint): Promise<PayrollConfig> {
+  /** Read and parse `stream_config[configName]`. */
+  async getStreamConfig(configName: string | bigint): Promise<StreamConfig> {
     const value = await this.networkClient.getProgramMappingValue(
       this.programId,
-      "payroll_configs",
+      "stream_configs",
       fieldLiteral(configName),
     );
 
     if (!value) {
-      throw new Error(`Could not fetch payroll config for config name: ${configName}`)
+      throw new Error(`Could not fetch stream config for config name: ${configName}`)
     }
 
-    return parsePayrollConfig(value);
+    return parseStreamConfig(value);
   }
 
   /**
@@ -566,8 +566,8 @@ export class PayrollService {
    * remainder (`deposited_amount - withdrawn_amount`).
    *
    * `fullAmount` — the stream's total (from the receiver/sender ticket for
-   * private streams or the `payrolls` mapping for public ones). When omitted,
-   * it is fetched from `payrolls` for public streams; for private streams it
+   * private streams or the `streams` mapping for public ones). When omitted,
+   * it is fetched from `streams` for public streams; for private streams it
    * falls back to `deposited_amount`, which understates accrued-but-unfunded
    * amounts on buffer-mode streams.
    */
@@ -581,7 +581,7 @@ export class PayrollService {
     let base = fullAmount;
     if (base === undefined) {
       if (anchor.isPublic) {
-        base = (await this.getPayroll(streamId)).fullAmount;
+        base = (await this.getStream(streamId)).fullAmount;
       } else {
         // Private fallback without ticket access: cap at what is funded.
         base = anchor.depositedAmount;
@@ -649,7 +649,7 @@ export class PayrollService {
   /**
    * List all public stream ids ever created by `account` (outgoing registry,
    * in creation order). Includes canceled and ended streams — filter via
-   * {@link PayrollService.getStreamAnchor}.
+   * {@link StreamService.getStreamAnchor}.
    */
   async listOutgoingStreamIds(account: string): Promise<string[]> {
     const count = await this.getOutgoingStreamCount(account);
@@ -683,10 +683,10 @@ export class PayrollService {
 
   /**
    * List every public stream touching `account` in both directions, hydrated
-   * with its anchor and (public) payroll entry. A stream where `account` is
+   * with its anchor and (public) stream entry. A stream where `account` is
    * both sender and receiver appears once with `direction: "both"`. Canceled
    * and ended streams are included; use `anchor.canceled` /
-   * `anchor.withdrawnAmount >= payroll.fullAmount` to filter.
+   * `anchor.withdrawnAmount >= stream.fullAmount` to filter.
    */
   async listPublicStreams(account: string): Promise<ListedStream[]> {
     const [outIds, inIds] = await Promise.all([
@@ -709,7 +709,7 @@ export class PayrollService {
     await Promise.all(
       entries.map(async (entry) => {
         entry.anchor = await this.getStreamAnchor(entry.streamId).catch(() => undefined);
-        entry.payroll = await this.getPayroll(entry.streamId).catch(() => undefined);
+        entry.stream = await this.getStream(entry.streamId).catch(() => undefined);
       }),
     );
     return entries;
@@ -772,7 +772,7 @@ export class PayrollService {
     return record.toString();
   }
 
-  /** Find a payroll ticket record of the client's account. */
+  /** Find a stream ticket record of the client's account. */
   async findTicket(recordName: TicketRecordName, streamId: string | bigint): Promise<string> {
     const record = await findTicketRecord(
       this.networkClient,
@@ -796,10 +796,10 @@ export class PayrollService {
   ): Promise<string> {
     console.log("inputs", inputs);
     if (this.account === undefined) {
-      throw new Error("PayrollClient was constructed without a privateKey");
+      throw new Error("StreamClient was constructed without a privateKey");
     }
     // Dynamic call targets (e.g. the IARC22 token program) are not static
-    // imports of the payroll program, so their sources must be supplied
+    // imports of the stream program, so their sources must be supplied
     // explicitly for the snarkVM process to contain their stacks.
     const imports = { ...this.programImports, ...extraImports };
     if (this.proverUri !== undefined) {
@@ -889,7 +889,7 @@ export class PayrollService {
 
   private requirePrivateKey(): string {
     if (this.privateKey === undefined) {
-      throw new Error("PayrollClient was constructed without a privateKey");
+      throw new Error("StreamClient was constructed without a privateKey");
     }
     return this.privateKey;
   }
@@ -915,7 +915,7 @@ export interface Arc22ServiceOptions {
 /**
  * High-level interface to an IARC22 token program (e.g.
  * `test_usdcx_stablecoin.aleo`). Exposes `approve` / `unapprove` (the
- * on-chain entry points needed to fund payroll streams) plus direct mapping
+ * on-chain entry points needed to fund stream streams) plus direct mapping
  * reads (`getAllowance`, `getBalanceOf`).
  */
 export class Arc22Service {

@@ -1,9 +1,9 @@
 /**
- * zebec-payroll-sdk — TypeScript SDK for the `test_zebec_payroll_v9.aleo` program.
+ * zebec-stream-sdk — TypeScript SDK for the `test_zebec_stream_v1.aleo` program.
  */
 
 export {
-  PayrollService as PayrollClient,
+  StreamService as StreamClient,
   Arc22Service,
   DEFAULT_ENDPOINT,
   PROGRAM_ID,
@@ -18,13 +18,13 @@ export {
   streamAnchorToPlaintext,
   merkleProofToPlaintext,
   merkleProofsToPlaintext,
-  payrollToPlaintext,
+  streamToPlaintext,
   fieldLiteral,
   identLiteral,
   parseStructMembers,
   parseStreamAnchor,
-  parsePayroll,
-  parsePayrollConfig,
+  parseStream,
+  parseStreamConfig,
   parseSenderTicket,
   parseReceiverTicket,
   parseWithdrawerTicket,
@@ -80,9 +80,9 @@ export type {
   ExecuteOptions,
   ListedStream,
   MerkleProof,
-  Payroll,
-  PayrollClientOptions,
-  PayrollConfig,
+  Stream,
+  StreamClientOptions,
+  StreamConfig,
   ReceiverTicket,
   SenderTicket,
   StreamAnchor,

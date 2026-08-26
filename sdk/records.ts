@@ -1,7 +1,7 @@
 /**
- * Helpers for locating unspent records needed by `test_zebec_payroll_v9.aleo`
+ * Helpers for locating unspent records needed by `test_zebec_stream_v1.aleo`
  * transitions: `credits.aleo` records for fees, IARC22 token records for
- * stream deposits, and payroll ticket records for stream management.
+ * stream deposits, and stream ticket records for stream management.
  */
 
 import * as fs from "node:fs";
@@ -239,19 +239,19 @@ export async function findTokenRecord(
 }
 
 export type TicketRecordName =
-  | "SenderPayrollTicket"
-  | "ReceiverPayrollTicket"
-  | "WithdrawerPayrollTicket";
+  | "SenderStreamTicket"
+  | "ReceiverStreamTicket"
+  | "WithdrawerStreamTicket";
 
 /**
- * Record plaintexts do not carry the record name, but every payroll ticket
+ * Record plaintexts do not carry the record name, but every stream ticket
  * carries a `ticket_type` member (see `main.leo`): 0 = sender, 1 = receiver,
  * 2 = withdrawer.
  */
 const TICKET_TYPE_BY_NAME: Record<TicketRecordName, number> = {
-  SenderPayrollTicket: 0,
-  ReceiverPayrollTicket: 1,
-  WithdrawerPayrollTicket: 2,
+  SenderStreamTicket: 0,
+  ReceiverStreamTicket: 1,
+  WithdrawerStreamTicket: 2,
 };
 
 function matchesTicket(text: string, recordName: TicketRecordName): boolean {
@@ -260,7 +260,7 @@ function matchesTicket(text: string, recordName: TicketRecordName): boolean {
 }
 
 /**
- * Find the unspent payroll ticket record of `recordName` for `streamId`
+ * Find the unspent stream ticket record of `recordName` for `streamId`
  * owned by the account behind `privateKey`. Throws if not found.
  */
 export async function findTicketRecord(

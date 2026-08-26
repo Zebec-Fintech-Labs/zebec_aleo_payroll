@@ -1,5 +1,5 @@
 /**
- * TypeScript mirrors of the Leo structs in `test_zebec_payroll_v9.aleo` (see
+ * TypeScript mirrors of the Leo structs in `test_zebec_stream_v1.aleo` (see
  * `src/main.leo` at the repository root) plus SDK option types.
  *
  * Conventions used across the SDK:
@@ -12,8 +12,8 @@
  * - Integer types (`u8`/`u32`/`u64`/`u128`/`i64`) are `bigint`.
  */
 
-/** Leo `Payroll` struct, as stored in the `payrolls` mapping (public streams only). */
-export interface Payroll {
+/** Leo `Stream` struct, as stored in the `streams` mapping (public streams only). */
+export interface Stream {
   streamId: string;
   /** Config (tenant) the stream was created under. */
   config: string;
@@ -29,8 +29,8 @@ export interface Payroll {
   initialized: boolean;
 }
 
-/** Leo `PayrollConfig` struct, as stored in the `payroll_config` mapping. */
-export interface PayrollConfig {
+/** Leo `StreamConfig` struct, as stored in the `stream_config` mapping. */
+export interface StreamConfig {
   admin: string;
   feeVault: string;
   withdrawer: string;
@@ -75,7 +75,7 @@ export interface CreateStreamParams {
 
 /** Leo `Config` struct (input of `create_stream_private`). */
 export interface Config {
-  /** The `field` key of the config in the `payroll_config` mapping. */
+  /** The `field` key of the config in the `stream_config` mapping. */
   configName: string | bigint;
   admin: string;
   feeVault: string;
@@ -88,7 +88,7 @@ export interface Config {
 export interface StreamTokenFee {
   /**
    * Config name (`field`) this fee is signed for. Binds the admin's
-   * signature to one payroll config so it cannot be replayed elsewhere.
+   * signature to one stream config so it cannot be replayed elsewhere.
    */
   config: string | bigint;
   /** Identifier of the stream token program. */
@@ -104,7 +104,7 @@ export interface StreamTokenFee {
 /** @deprecated Use {@link StreamTokenFee} instead. */
 export type TokenPrice = StreamTokenFee;
 
-/** Leo `SenderPayrollTicket` record (ticket_type 0) — authorizes pause/resume/topup/cancel. */
+/** Leo `SenderStreamTicket` record (ticket_type 0) — authorizes pause/resume/topup/cancel. */
 export interface SenderTicket {
   owner: string;
   ticketType: bigint;
@@ -120,7 +120,7 @@ export interface SenderTicket {
   topupCount: bigint;
 }
 
-/** Leo `ReceiverPayrollTicket` record (ticket_type 1) — authorizes withdraw. */
+/** Leo `ReceiverStreamTicket` record (ticket_type 1) — authorizes withdraw. */
 export interface ReceiverTicket {
   owner: string;
   ticketType: bigint;
@@ -133,7 +133,7 @@ export interface ReceiverTicket {
   streamId: string;
 }
 
-/** Leo `WithdrawerPayrollTicket` record (ticket_type 2) — authorizes auto-withdraw. */
+/** Leo `WithdrawerStreamTicket` record (ticket_type 2) — authorizes auto-withdraw. */
 export interface WithdrawerTicket {
   owner: string;
   ticketType: bigint;
@@ -157,26 +157,26 @@ export interface MerkleProof {
 /** Relationship of an account to a listed stream. */
 export type StreamDirection = "outgoing" | "incoming" | "both";
 
-/** One entry of {@link PayrollClient.listPublicStreams}. */
+/** One entry of {@link StreamClient.listPublicStreams}. */
 export interface ListedStream {
   streamId: string;
   direction: StreamDirection;
   /** On-chain anchor; `undefined` when the anchor read fails. */
   anchor?: StreamAnchor | undefined;
-  /** Public payroll entry; `undefined` for private streams or failed reads. */
-  payroll?: Payroll | undefined;
+  /** Public stream entry; `undefined` for private streams or failed reads. */
+  stream?: Stream | undefined;
 }
 
-/** Options for constructing a {@link PayrollClient}. */
-export interface PayrollClientOptions {
+/** Options for constructing a {@link StreamClient}. */
+export interface StreamClientOptions {
   /** API host. Defaults to the testnet explorer API. */
   host?: string;
-  /** Program id. Defaults to `test_zebec_payroll_v9.aleo`. */
+  /** Program id. Defaults to `test_zebec_stream_v1.aleo`. */
   programId?: string;
   /** Private key of the transacting account (`APrivateKey1...`). */
   privateKey?: string;
   /**
-   * Compiled program source (`build/test_zebec_payroll_v9/test_zebec_payroll_v9.aleo`). When
+   * Compiled program source (`build/test_zebec_stream_v1/test_zebec_stream_v1.aleo`). When
    * provided, it is used for executions instead of fetching the (deployed)
    * program from the network — useful before the program is deployed.
    */

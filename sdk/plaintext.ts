@@ -14,8 +14,8 @@ import type {
   Config,
   CreateStreamParams,
   MerkleProof,
-  Payroll,
-  PayrollConfig,
+  Stream,
+  StreamConfig,
   ReceiverTicket,
   SenderTicket,
   StreamAnchor,
@@ -40,8 +40,8 @@ export function identLiteral(name: string): string {
   return `'${trimmed}'`;
 }
 
-/** Serialize a `Payroll` struct to its Leo plaintext literal. */
-export function payrollToPlaintext(p: Payroll): string {
+/** Serialize a `Stream` struct to its Leo plaintext literal. */
+export function streamToPlaintext(p: Stream): string {
   return validated(
     `{ stream_id: ${fieldLiteral(p.streamId)}, config: ${fieldLiteral(p.config)}, ` +
     `sender: ${p.sender}, receiver: ${p.receiver}, ` +
@@ -222,8 +222,8 @@ export function parseIdentLiteral(value: string): string {
   return m[1]!;
 }
 
-/** Parse a `Payroll` mapping value. */
-export function parsePayroll(plaintext: string): Payroll {
+/** Parse a `Stream` mapping value. */
+export function parseStream(plaintext: string): Stream {
   if (!plaintext) {
     throw new Error("value is empty: " + plaintext);
   }
@@ -267,8 +267,8 @@ export function parseStreamAnchor(plaintext: string): StreamAnchor {
   };
 }
 
-/** Parse a `PayrollConfig` mapping value. */
-export function parsePayrollConfig(plaintext: string): PayrollConfig {
+/** Parse a `StreamConfig` mapping value. */
+export function parseStreamConfig(plaintext: string): StreamConfig {
   if (!plaintext) {
     throw new Error("value is empty: " + plaintext);
   }
@@ -288,7 +288,7 @@ export function parsePayrollConfig(plaintext: string): PayrollConfig {
 // =========================================================================
 
 /**
- * Parse a decrypted `SenderPayrollTicket` record plaintext (ticket_type 0).
+ * Parse a decrypted `SenderStreamTicket` record plaintext (ticket_type 0).
  * Throws when the plaintext is not a sender ticket.
  */
 export function parseSenderTicket(plaintext: string): SenderTicket {
@@ -309,7 +309,7 @@ export function parseSenderTicket(plaintext: string): SenderTicket {
 }
 
 /**
- * Parse a decrypted `ReceiverPayrollTicket` record plaintext (ticket_type 1).
+ * Parse a decrypted `ReceiverStreamTicket` record plaintext (ticket_type 1).
  * Throws when the plaintext is not a receiver ticket.
  */
 export function parseReceiverTicket(plaintext: string): ReceiverTicket {
@@ -327,7 +327,7 @@ export function parseReceiverTicket(plaintext: string): ReceiverTicket {
 }
 
 /**
- * Parse a decrypted `WithdrawerPayrollTicket` record plaintext (ticket_type 2).
+ * Parse a decrypted `WithdrawerStreamTicket` record plaintext (ticket_type 2).
  * Throws when the plaintext is not a withdrawer ticket.
  */
 export function parseWithdrawerTicket(plaintext: string): WithdrawerTicket {
