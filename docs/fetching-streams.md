@@ -1,7 +1,7 @@
 # Fetching Payroll Streams On-Chain (Production Guide)
 
 How to discover and read **public** and **private** payroll streams created by
-`test_zebec_payroll_v8.aleo` from the browser, via the Shield wallet
+`test_zebec_payroll_v9.aleo` from the browser, via the Shield wallet
 (`app/src/payroll/WalletPayrollService.ts`) and `AleoNetworkClient` mapping
 reads.
 
@@ -20,6 +20,27 @@ state lives in encrypted records owned by the participants.
 | `payrolls` | `stream_id: field` | `Payroll` | `create_stream_public`, `topup_stream_public` only |
 | `payroll_configs` | `config: field` | `PayrollConfig` | admin |
 | `whitelisted_token_programs` | `BHP256(WhitelistKey)` | `bool` | admin |
+| `outgoing_stream_counts` | `account: address` | `u64` | `create_stream_public` only |
+| `incoming_stream_counts` | `account: address` | `u64` | `create_stream_public` only |
+| `outgoing_stream_refs` | `BHP256(StreamRefKey)` | `stream_id: field` | `create_stream_public` only |
+| `incoming_stream_refs` | `BHP256(StreamRefKey)` | `stream_id: field` | `create_stream_public` only |
+
+`StreamRefKey` (the per-address registry slot key):
+
+```
+account: address, index: u64
+```
+
+The two `*_stream_counts` mappings track how many public streams an address has
+ever created (sender) or received (receiver). For each, the corresponding
+`*_stream_refs` mapping is keyed by `BHP256(StreamRefKey { account, index })`
+and holds the `stream_id` at that slot — an **append-only** list. Canceled or
+ended streams are *not* removed; filter them client-side via the anchor (§5).
+Self-streams (sender == receiver) appear in both registries.
+
+> This registry is only populated for **public** streams. Private-mode streams
+> never write sender/receiver to public state — list those by scanning ticket
+> records (§3/§4.2).
 
 `StreamAnchor` (declaration order matters — see §5):
 
@@ -83,7 +104,7 @@ import {
 } from "../sdk/index.js";
 
 const client = new AleoNetworkClient(network);
-const PROGRAM = "test_zebec_payroll_v8.aleo";
+const PROGRAM = "test_zebec_payroll_v9.aleo";
 const key = `${streamId}field`; // plaintext literal form
 
 const anchor = parseStreamAnchor(
@@ -102,12 +123,13 @@ const { withdrawable } = computeWithdrawableAmount(anchor, nowSec);
 ```
 
 Equivalent one-liners already exist in `WalletPayrollService`
-(`app/src/payroll/WalletPayrollService.ts:503+`):
+(`app/src/payroll/WalletPayrollService.ts`):
 `getStreamAnchor(id)`, `getPayroll(id)`, `getWithdrawableAmounts(id)` — plus
 program previews for local/off-chain queries:
   `view fn get_payroll(field) -> Payroll`, `view fn get_stream_anchor(field) -> StreamAnchor`
 
-For **listing** public streams, see §4 — mappings are not iterable on-chain.
+For **listing** public streams by address, see §4.1 — the registries below
+make this possible without walking the chain.
 
 ---
 
@@ -122,7 +144,7 @@ Private streams need two things per participant:
 
 ### 3. Browser (Shield wallet)
 
-Records-via-wallet pattern (`WalletPayrollService.decryptProgramRecords`, line 592):
+Records-via-wallet pattern (`WalletPayrollService.decryptProgramRecords`):
 
 ```ts
 const envelopes = await wallet.requestRecords(PROGRAM, false); // false = include plaintext filter
@@ -139,9 +161,10 @@ const type = Number(text.match(/ticket_type:\s*(\d+)u8/)?.[1]);   // 0|1|2
 const sid  = text.match(/stream_id:\s*(\d+)field/)?.[1];
 ```
 
-Existing helpers: `findTicket(recordName, streamId)` (line 658) and
-**`listMyTickets()`** (line 676) which enumerates every unspent ticket the
-wallet owns — the closest thing today to "list my streams" for employees.
+Existing helpers: `findTicket(recordName, streamId)` and
+**`listMyTickets()`** which enumerates every unspent ticket the wallet owns,
+plus `listMyPrivateStreams()` which collapses them into `(stream_id, direction)`
+entries — the employee-facing "list my streams" for private-mode streams.
 
 Notes:
 
@@ -149,32 +172,88 @@ Notes:
 - Always filter `spent === false`: consumed tickets (e.g. after every private
   withdrawal) still decrypt fine and will double-count if included.
 - Pick the highest-value credit/token record covering the minimum, not merely
-  the first (`findCredits` line 613).
+  the first (`findCredits` in `WalletPayrollService`).
 
 ---
 
-## 4. Discovering streams (the current gap)
+## 4. Discovering streams
 
-There is **no on-chain enumeration**: mappings are not iterable, and
-`stream_id` is a fresh random `field` per stream. Discovery options, in order
-of recommendation for production:
+Mapping enumeration is still impossible on-chain (`get`/`get_or_use` only),
+but the per-address registries (§1) now make **public** streams listable by
+sender/receiver without a chain-walking indexer. Private streams continue to
+be discovered only through wallet-held ticket records (§4.2).
 
-1. **Your own registry (recommended).** At creation time, persist
-   `(stream_id, role, mode, txId, parties)` in your backend DB. This is the
-   only scalable way to list streams across many employers/employees.
-   Optionally mirror it on-chain in an index mapping later
-   (`user_streams: address => [stream_id]` style) if public discoverability is
-   acceptable — note that leaks recipient↔employer linkage, so do not do this
-   for private-mode streams.
-2. **Wallet-held tickets** (`listMyTickets()`) — lists all private streams
-   where the connected wallet is a participant.
-3. **Chain-walking indexer (fallback/compliance).** Every create emits
+### 4.1 Public streams — the on-chain registries
+
+For a given `account`, read the count then each ref slot:
+
+```ts
+import { streamRefKey } from "../sdk/index.js";
+
+async function listPublicStreamIds(client, PROGRAM, account, direction) {
+  const count = BigInt(
+    await client.getProgramMappingValue(PROGRAM, `${direction}_stream_counts`, account),
+  );
+  const ids = [];
+  for (let i = 0n; i < count; i++) {
+    const ref = await client.getProgramMappingValue(
+      PROGRAM,
+      `${direction}_stream_refs`,
+      streamRefKey(account, i), // BHP256 hash of StreamRefKey{account,index}
+    );
+    ids.push(ref); // "0field" only if the slot is unset (shouldn't happen)
+  }
+  return ids; // direction: "outgoing" (sender) | "incoming" (receiver)
+}
+```
+
+`streamRefKey(account, index)` reproduces the on-chain `BHP256::hash_to_field`
+key; its derivation is covered by SDK parity tests. Hydrate each id with
+`getStreamAnchor` / `getPayroll` (§2). `WalletPayrollService.listMyPublicStreams()`
+and `PayrollClient.listPublicStreams(account)` already do this and merge the
+two directions into one list with `direction: outgoing | incoming | both`.
+
+Sample the new view functions directly:
+
+```
+view fn get_outgoing_stream_count(account) -> u64
+view fn get_incoming_stream_count(account) -> u64
+view fn get_outgoing_stream_ref(account, index) -> field   // 0field if unset
+view fn get_incoming_stream_ref(account, index) -> field
+```
+
+Notes:
+- The lists are **append-only**: canceled and ended streams remain and must be
+  filtered client-side (`anchor.canceled`, `anchor.withdrawn_amount >= payroll.fullAmount`).
+- **Self-streams** (sender == receiver) appear in both `outgoing` and `incoming`.
+- Only **public** streams are indexed; private-mode streams never touch these
+  mappings.
+
+### 4.2 Private streams — wallet ticket scan
+
+No on-chain index exists for private streams by design. Discovery goes through
+the wallet's unspent ticket records, enumerated by `listMyTickets()` (sender
+tickets ⇒ outgoing, receiver tickets ⇒ incoming). `WalletPayrollService.listMyPrivateStreams()`
+returns them deduped per `(stream_id, direction)`, with the decrypted ticket
+plaintext for counterparty/amount. Re-read the anchor per id and treat
+`anchor.canceled == true` as terminal (the sender ticket is burned on cancel).
+Withdrawer tickets (`ticket_type 2`) mirror an existing stream and are skipped
+from the list.
+
+### 4.3 Other discovery options
+
+1. **Your own backend registry (still recommended for scale).** At creation
+   time persist `(stream_id, role, mode, txId, parties)`; the on-chain registry
+   covers public-only queries, but a backend gives audit history, pagination,
+   and private-stream coverage in one place.
+2. **Chain-walking indexer (fallback/compliance).** Every create emits
    transitions visible in blocks; a full-node indexer can extract
    `finalize_create_stream` writes to `stream_anchors`. For public streams the
-   `payrolls` entries give full detail; for private streams you can index
-   `(stream_id → anchor status)` but **cannot** recover parties or amounts —
-   by design. Respect the privacy model: any indexer must not attempt to
-   correlate private-stream timing/addresses into a public UI.
+   `payrolls` entries (and now the registry mappings) give full detail; for
+   private streams you can index `(stream_id → anchor status)` but **cannot**
+   recover parties or amounts — by design. Respect the privacy model: any
+   indexer must not attempt to correlate private-stream timing/addresses into a
+   public UI.
 
 ---
 
@@ -200,8 +279,10 @@ Rules that will bite you if ignored:
 
 - **Struct member order is consensus-critical.** Mapping values and signed
   structs are hashed as bits in Leo declaration order
-  (`BHP256::hash_to_field`). Never reorder fields in `sdk/plaintext.ts`
-  emitters/parsers without regenerating vectors and redeploying considerations.
+  (`BHP256::hash_to_field`). This includes `StreamRefKey` (the registry key),
+  whose `account, index` order must match the SDK's `streamRefKey()` — covered
+  by parity tests under `sdk-tests/unit/hashing.test.ts`. Never reorder fields
+  in `sdk/plaintext.ts` emitters/parsers without regenerating vectors.
 - **Private lifecycle fns take caller-supplied anchor snapshots** asserted
   equal on-chain (`assert_stream_anchor_eq`). Always fetch the anchor
   immediately before building the tx; a stale snapshot fails the proof after
@@ -220,6 +301,8 @@ Rules that will bite you if ignored:
 | --- | --- |
 | Read anchor / payroll by id | `getProgramMappingValue` + `parseStreamAnchor` / `parsePayroll` |
 | Preview amounts | `getWithdrawableAmounts(streamId)`, `view fn get_payroll` |
+| List public streams for an address | `listPublicStreams(addr)` / `listMyPublicStreams()` (registries, §4.1) |
 | Find my tickets | `wallet.requestRecords(prog, false)` → decrypt → classify `ticket_type` |
-| List all streams for a user | backend registry keyed at creation (§4.1) |
+| List private streams for a wallet | `listMyPrivateStreams()` (record scan, §4.2) |
+| List all streams (public + private) | `listMyStreams()` |
 | Token/config checks | `isTokenWhitelisted`, `getPayrollConfig` |
