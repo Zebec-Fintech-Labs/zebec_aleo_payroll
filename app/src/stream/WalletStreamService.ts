@@ -1,6 +1,6 @@
 /**
- * `WalletPayrollService` — wallet-backed counterpart of the Node
- * `PayrollService` (sdk/client.ts). All transactions are executed by the
+ * `WalletStreamService` — wallet-backed counterpart of the Node
+ * `StreamService` (sdk/client.ts). All transactions are executed by the
  * Shield wallet (`executeTransaction` / `executeDeployment`) and all records
  * come from the wallet (`requestRecords` + `decrypt`); mapping reads go
  * through an `AleoNetworkClient`, exactly as in the Node SDK.
@@ -27,11 +27,11 @@ import {
   parseBoolLiteral,
   parseFieldLiteral,
   parseIntLiteral,
-  parsePayroll,
-  parsePayrollConfig,
+  parseStream,
+  parseStreamConfig,
   parseSenderTicket,
   parseStreamAnchor,
-  payrollToPlaintext,
+  streamToPlaintext,
   streamAnchorToPlaintext,
   streamTokenFeeToPlaintext,
 } from "../../../sdk/plaintext.ts";
@@ -39,8 +39,8 @@ import { signStreamTokenFee } from "../../../sdk/signing.ts";
 import type {
   Config,
   CreateStreamParams,
-  Payroll,
-  PayrollConfig,
+  Stream,
+  StreamConfig,
   StreamAnchor,
   StreamTokenFee,
 } from "../../../sdk/types.ts";
@@ -59,7 +59,7 @@ import {
 } from "../config.ts";
 
 /** Subset of the `useWallet()` context the service needs. */
-export interface PayrollWallet {
+export interface StreamWallet {
   address: string;
   requestRecords(program: string, includePlaintext?: boolean): Promise<unknown[]>;
   decrypt(ciphertext: string): Promise<string>;
@@ -80,9 +80,9 @@ export interface PayrollWallet {
 }
 
 export type TicketRecordName =
-  | "SenderPayrollTicket"
-  | "ReceiverPayrollTicket"
-  | "WithdrawerPayrollTicket";
+  | "SenderStreamTicket"
+  | "ReceiverStreamTicket"
+  | "WithdrawerStreamTicket";
 
 export interface TicketInfo {
   kind: TicketRecordName;
@@ -98,12 +98,12 @@ export interface PrivateStreamRef {
   ticketPlaintext: string;
 }
 
-/** One entry of {@link WalletPayrollService.listMyPublicStreams}. */
+/** One entry of {@link WalletStreamService.listMyPublicStreams}. */
 export interface PublicStreamEntry {
   streamId: string;
   direction: "outgoing" | "incoming" | "both";
   anchor?: StreamAnchor | undefined;
-  payroll?: Payroll | undefined;
+  stream?: Stream | undefined;
 }
 
 const TX_TIMEOUT_MS = 600_000;
@@ -127,14 +127,14 @@ function recordAmount(plaintext: string, member: string): bigint | undefined {
 }
 
 /**
- * Record plaintexts do not carry the record name, but every payroll ticket
+ * Record plaintexts do not carry the record name, but every stream ticket
  * carries a `ticket_type` member (ported from sdk/records.ts): 0 = sender,
  * 1 = receiver, 2 = withdrawer.
  */
 const TICKET_KIND_BY_TYPE: Record<number, TicketRecordName> = {
-  0: "SenderPayrollTicket",
-  1: "ReceiverPayrollTicket",
-  2: "WithdrawerPayrollTicket",
+  0: "SenderStreamTicket",
+  1: "ReceiverStreamTicket",
+  2: "WithdrawerStreamTicket",
 };
 
 function classifyTicket(text: string): TicketRecordName | undefined {
@@ -147,12 +147,12 @@ function matchesTicket(text: string, recordName: TicketRecordName): boolean {
   return classifyTicket(text) === recordName;
 }
 
-export class WalletPayrollService {
-  readonly wallet: PayrollWallet;
+export class WalletStreamService {
+  readonly wallet: StreamWallet;
   readonly networkClient: AleoNetworkClient;
   private programAddress: string | undefined;
 
-  constructor(wallet: PayrollWallet) {
+  constructor(wallet: StreamWallet) {
     this.wallet = wallet;
     this.networkClient = new AleoNetworkClient(HOST);
   }
@@ -167,7 +167,7 @@ export class WalletPayrollService {
 
   /**
    * Execute `create_stream_private` through the wallet. Full flow ported from
-   * scripts/payroll.ts:createStream — on-chain config read, admin-signed
+   * scripts/stream.ts:createStream — on-chain config read, admin-signed
    * stream fee, Sealance compliance proofs, and credit/token record selection
    * from the wallet.
    *
@@ -230,7 +230,7 @@ export class WalletPayrollService {
     streamId: string | bigint,
     fee: number = DEFAULT_FEE,
   ): Promise<string> {
-    const ticket = await this.findTicket("SenderPayrollTicket", streamId);
+    const ticket = await this.findTicket("SenderStreamTicket", streamId);
     return this.execute("pause_resume_stream_private", [ticket], fee);
   }
 
@@ -239,7 +239,7 @@ export class WalletPayrollService {
     streamId: string | bigint,
     fee: number = DEFAULT_FEE,
   ): Promise<string> {
-    const ticket = await this.findTicket("SenderPayrollTicket", streamId);
+    const ticket = await this.findTicket("SenderStreamTicket", streamId);
     const anchor = await this.getStreamAnchor(streamId);
     const inputs = [ticket, streamAnchorToPlaintext(anchor), `${nowSeconds()}i64`];
     return this.execute("cancel_stream_private", inputs, fee, DYNAMIC_DISPATCH_IMPORTS);
@@ -250,7 +250,7 @@ export class WalletPayrollService {
     streamId: string | bigint,
     fee: number = DEFAULT_FEE,
   ): Promise<string> {
-    const ticket = await this.findTicket("ReceiverPayrollTicket", streamId);
+    const ticket = await this.findTicket("ReceiverStreamTicket", streamId);
     const anchor = await this.getStreamAnchor(streamId);
     const inputs = [ticket, streamAnchorToPlaintext(anchor), `${nowSeconds()}i64`];
     return this.execute("withdraw_stream_private", inputs, fee, DYNAMIC_DISPATCH_IMPORTS);
@@ -267,7 +267,7 @@ export class WalletPayrollService {
     fee: number = DEFAULT_FEE,
   ): Promise<string> {
     const now = nowSeconds();
-    const ticket = await this.findTicket("WithdrawerPayrollTicket", streamId);
+    const ticket = await this.findTicket("WithdrawerStreamTicket", streamId);
     const anchor = await this.getStreamAnchor(streamId);
     const inputs = [
       ticket,
@@ -289,7 +289,7 @@ export class WalletPayrollService {
     fee: number = DEFAULT_FEE,
   ): Promise<string> {
     const now = nowSeconds();
-    const ticket = await this.findTicket("SenderPayrollTicket", streamId);
+    const ticket = await this.findTicket("SenderStreamTicket", streamId);
     const anchor = await this.getStreamAnchor(streamId);
     const { fullAmount } = parseSenderTicket(ticket);
     const { topupAmount } = computeTopupAmount(anchor, fullAmount, now, extra);
@@ -349,32 +349,32 @@ export class WalletPayrollService {
     return this.execute("pause_resume_stream_public", [fieldLiteral(streamId)], fee);
   }
 
-  /** Execute `cancel_stream_public`. Payroll + anchor resolved automatically. */
+  /** Execute `cancel_stream_public`. Stream + anchor resolved automatically. */
   async cancelStreamPublic(
     streamId: string | bigint,
     fee: number = DEFAULT_FEE,
   ): Promise<string> {
     const now = nowSeconds();
-    const payroll = await this.getPayroll(streamId);
+    const stream = await this.getStream(streamId);
     const anchor = await this.getStreamAnchor(streamId);
     const inputs = [
-      payrollToPlaintext(payroll),
+      streamToPlaintext(stream),
       streamAnchorToPlaintext(anchor),
       `${now}i64`,
     ];
     return this.execute("cancel_stream_public", inputs, fee, DYNAMIC_DISPATCH_IMPORTS);
   }
 
-  /** Execute `withdraw_stream_public`. Payroll + anchor resolved automatically. */
+  /** Execute `withdraw_stream_public`. Stream + anchor resolved automatically. */
   async withdrawPublic(
     streamId: string | bigint,
     fee: number = DEFAULT_FEE,
   ): Promise<string> {
     const now = nowSeconds();
-    const payroll = await this.getPayroll(streamId);
+    const stream = await this.getStream(streamId);
     const anchor = await this.getStreamAnchor(streamId);
     const inputs = [
-      payrollToPlaintext(payroll),
+      streamToPlaintext(stream),
       streamAnchorToPlaintext(anchor),
       `${now}i64`,
     ];
@@ -384,10 +384,10 @@ export class WalletPayrollService {
   /**
    * Execute `topup_stream_public`: pay the accrued debt of a buffer-mode
    * public stream plus `extra` pre-paid coverage. The connected wallet must
-   * be the payroll's sender and must have approved this program on the token
+   * be the stream's sender and must have approved this program on the token
    * (the deposit is pulled from the sender's public balance via
    * `IARC22::transfer_from_public` — see `WalletArc22Service.approve`).
-   * Payroll + anchor resolved automatically.
+   * Stream + anchor resolved automatically.
    */
   async topupStreamPublic(
     streamId: string | bigint,
@@ -395,16 +395,16 @@ export class WalletPayrollService {
     fee: number = DEFAULT_FEE,
   ): Promise<string> {
     const now = nowSeconds();
-    const payroll = await this.getPayroll(streamId);
+    const stream = await this.getStream(streamId);
     const anchor = await this.getStreamAnchor(streamId);
     // Fail fast when there is nothing to pay: the on-chain entry asserts
     // `debt_amount + extra > 0` with the same pause-aware debt math.
-    const { topupAmount } = computeTopupAmount(anchor, payroll.fullAmount, now, extra);
+    const { topupAmount } = computeTopupAmount(anchor, stream.fullAmount, now, extra);
     if (topupAmount <= 0n) {
       throw new Error("top-up amount is zero: no accrued debt and no extra pre-payment");
     }
     const inputs = [
-      payrollToPlaintext(payroll),
+      streamToPlaintext(stream),
       streamAnchorToPlaintext(anchor),
       `${extra}u128`,
       `${now}i64`,
@@ -415,7 +415,7 @@ export class WalletPayrollService {
   /**
    * Execute `withdraw_stream_auto_public`: pay out the receiver's accrued
    * amount on behalf of the receiver. Withdrawer only — the connected wallet
-   * must be the config's withdrawer. Payroll + anchor resolved automatically.
+   * must be the config's withdrawer. Stream + anchor resolved automatically.
    */
   async withdrawAutoPublic(
     streamId: string | bigint,
@@ -423,10 +423,10 @@ export class WalletPayrollService {
     fee: number = DEFAULT_FEE,
   ): Promise<string> {
     const now = nowSeconds();
-    const payroll = await this.getPayroll(streamId);
+    const stream = await this.getStream(streamId);
     const anchor = await this.getStreamAnchor(streamId);
     const inputs = [
-      payrollToPlaintext(payroll),
+      streamToPlaintext(stream),
       configToPlaintext(config),
       streamAnchorToPlaintext(anchor),
       `${now}i64`,
@@ -488,7 +488,7 @@ export class WalletPayrollService {
   // Deployment
   // =======================================================================
 
-  /** Deploy (or upgrade) the payroll program through the wallet. */
+  /** Deploy (or upgrade) the stream program through the wallet. */
   async deploy(program: string, fee: number = DEFAULT_FEE): Promise<string> {
     const deployment: AleoDeployment = {
       program,
@@ -505,7 +505,7 @@ export class WalletPayrollService {
   // =======================================================================
 
   /**
-   * The payroll program's own on-chain address — what `std::ctx::addr()`
+   * The stream program's own on-chain address — what `std::ctx::addr()`
    * resolves to inside the program. Needed as the `spender` for
    * `approve_public` on the token program before `create_stream_public`'s
    * deposit transfer, and matches `self_address` in the cancel/withdraw
@@ -526,24 +526,24 @@ export class WalletPayrollService {
     return parseStreamAnchor(value);
   }
 
-  /** Read and parse `payrolls[streamId]` (public streams only). */
-  async getPayroll(streamId: string | bigint): Promise<Payroll> {
+  /** Read and parse `streams[streamId]` (public streams only). */
+  async getStream(streamId: string | bigint): Promise<Stream> {
     const value = await this.networkClient.getProgramMappingValue(
       PROGRAM_ID,
-      "payrolls",
+      "streams",
       fieldLiteral(streamId),
     );
-    return parsePayroll(value);
+    return parseStream(value);
   }
 
-  /** Read and parse `payroll_config[configName]`. */
-  async getPayrollConfig(configName: string | bigint = CONFIG_NAME): Promise<PayrollConfig> {
+  /** Read and parse `stream_config[configName]`. */
+  async getStreamConfig(configName: string | bigint = CONFIG_NAME): Promise<StreamConfig> {
     const value = await this.networkClient.getProgramMappingValue(
       PROGRAM_ID,
-      "payroll_configs",
+      "stream_configs",
       fieldLiteral(configName),
     );
-    return parsePayrollConfig(value);
+    return parseStreamConfig(value);
   }
 
   /**
@@ -574,8 +574,8 @@ export class WalletPayrollService {
    * (`deposited_amount - withdrawn_amount`).
    *
    * `fullAmount` — the stream's total (from the receiver/sender ticket for
-   * private streams or the `payrolls` mapping for public ones). When omitted,
-   * it is fetched from `payrolls` for public streams; for private streams it
+   * private streams or the `streams` mapping for public ones). When omitted,
+   * it is fetched from `streams` for public streams; for private streams it
    * falls back to `deposited_amount`, which understates accrued-but-unfunded
    * amounts on buffer-mode streams.
    */
@@ -589,7 +589,7 @@ export class WalletPayrollService {
     let base = fullAmount;
     if (base === undefined) {
       if (anchor.isPublic) {
-        base = (await this.getPayroll(streamId)).fullAmount;
+        base = (await this.getStream(streamId)).fullAmount;
       } else {
         // Private fallback without ticket access: cap at what is funded.
         base = anchor.depositedAmount;
@@ -682,7 +682,7 @@ export class WalletPayrollService {
     return best.text;
   }
 
-  /** Find the unspent payroll ticket record of `recordName` for `streamId`. */
+  /** Find the unspent stream ticket record of `recordName` for `streamId`. */
   async findTicket(
     recordName: TicketRecordName,
     streamId: string | bigint,
@@ -700,7 +700,7 @@ export class WalletPayrollService {
     throw new Error(`no ${recordName} record found for stream ${idDigits}`);
   }
 
-  /** Classify all unspent payroll ticket records held by the wallet. */
+  /** Classify all unspent stream ticket records held by the wallet. */
   async listMyTickets(): Promise<TicketInfo[]> {
     const plaintexts = await this.decryptProgramRecords(PROGRAM_ID);
     const tickets: TicketInfo[] = [];
@@ -719,7 +719,7 @@ export class WalletPayrollService {
   // =======================================================================
 
   /**
-   * List the wallet's private streams by scanning its unspent payroll ticket
+   * List the wallet's private streams by scanning its unspent stream ticket
    * records — no on-chain index exists for private streams (by design:
    * sender/receiver never touch public state). Sender tickets (ticket_type 0)
    * are outgoing, receiver tickets (ticket_type 1) are incoming. Deduplicated
@@ -730,8 +730,8 @@ export class WalletPayrollService {
     const streams = new Map<string, PrivateStreamRef>();
     for (const ticket of await this.listMyTickets()) {
       let direction: "outgoing" | "incoming";
-      if (ticket.kind === "SenderPayrollTicket") direction = "outgoing";
-      else if (ticket.kind === "ReceiverPayrollTicket") direction = "incoming";
+      if (ticket.kind === "SenderStreamTicket") direction = "outgoing";
+      else if (ticket.kind === "ReceiverStreamTicket") direction = "incoming";
       else continue; // withdrawer tickets mirror existing streams
       const key = `${ticket.streamId}:${direction}`;
       if (!streams.has(key)) {
@@ -749,9 +749,9 @@ export class WalletPayrollService {
   /**
    * List every public stream touching the wallet in both directions via the
    * on-chain per-address registries (`outgoing_stream_refs` /
-   * `incoming_stream_refs`), hydrated with anchor and payroll entries.
+   * `incoming_stream_refs`), hydrated with anchor and stream entries.
    * Includes canceled and ended streams — filter with
-   * `anchor.canceled` / `anchor.withdrawnAmount >= payroll.fullAmount`.
+   * `anchor.canceled` / `anchor.withdrawnAmount >= stream.fullAmount`.
    */
   async listMyPublicStreams(): Promise<PublicStreamEntry[]> {
     const [outIds, inIds] = await Promise.all([
@@ -771,7 +771,7 @@ export class WalletPayrollService {
     await Promise.all(
       entries.map(async (entry) => {
         entry.anchor = await this.getStreamAnchor(entry.streamId).catch(() => undefined);
-        entry.payroll = await this.getPayroll(entry.streamId).catch(() => undefined);
+        entry.stream = await this.getStream(entry.streamId).catch(() => undefined);
       }),
     );
     return entries;
@@ -780,7 +780,7 @@ export class WalletPayrollService {
   /**
    * Combined listing: public streams from the on-chain registries plus
    * private streams from wallet record scanning. Public entries carry their
-   * anchor/payroll; private entries carry the decrypted ticket plaintext.
+   * anchor/stream; private entries carry the decrypted ticket plaintext.
    */
   async listMyStreams(): Promise<{
     publicStreams: PublicStreamEntry[];
@@ -871,9 +871,9 @@ export class WalletPayrollService {
   // Internals
   // =======================================================================
 
-  /** Read the on-chain payroll config and shape it as the `Config` input. */
+  /** Read the on-chain stream config and shape it as the `Config` input. */
   async getConfigInput(): Promise<Config> {
-    const chainConfig = await this.getPayrollConfig(CONFIG_NAME);
+    const chainConfig = await this.getStreamConfig(CONFIG_NAME);
     return {
       configName: CONFIG_NAME,
       admin: chainConfig.admin,

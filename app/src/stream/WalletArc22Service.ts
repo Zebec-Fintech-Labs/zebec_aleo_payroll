@@ -10,7 +10,7 @@ import { AleoNetworkClient } from "@provablehq/sdk/testnet.js";
 
 import { tokenAllowanceKey } from "../../../sdk/hashing.ts";
 import { parseIntLiteral } from "../../../sdk/plaintext.ts";
-import type { PayrollWallet } from "./WalletPayrollService.ts";
+import type { StreamWallet } from "./WalletStreamService.ts";
 
 import { DEFAULT_FEE, HOST, TOKEN_PROGRAM_ID } from "../config.ts";
 
@@ -20,11 +20,11 @@ const TX_TIMEOUT_MS = 600_000;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class WalletArc22Service {
-  readonly wallet: PayrollWallet;
+  readonly wallet: StreamWallet;
   readonly networkClient: AleoNetworkClient;
   readonly tokenProgramId: string;
 
-  constructor(wallet: PayrollWallet, tokenProgramId: string = TOKEN_PROGRAM_ID) {
+  constructor(wallet: StreamWallet, tokenProgramId: string = TOKEN_PROGRAM_ID) {
     this.wallet = wallet;
     this.tokenProgramId = tokenProgramId;
     this.networkClient = new AleoNetworkClient(HOST);

@@ -1,22 +1,22 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
-  Payroll,
-  PayrollConfig,
+  Stream,
+  StreamConfig,
   StreamAnchor,
 } from "../../../sdk/types.ts";
 import type { WithdrawableAmounts } from "../../../sdk/math.ts";
 import { CONFIG_NAME, DEFAULT_FEE, TOKEN_PROGRAM } from "../config.ts";
-import type { UsePayroll } from "../hooks/usePayroll.ts";
+import type { UseStream } from "../hooks/useStream.ts";
 import { loadKnownStreamIds, addKnownStreamId } from "./publicStreamStore.ts";
 import { fieldLiteral } from "../../../sdk/plaintext.ts";
 import { parseBig, parseFee, requirePrefix } from "./form.ts";
 
 interface ConfigState {
-  config?: PayrollConfig;
+  config?: StreamConfig;
   whitelisted?: boolean;
 }
 
-/** A stream the wallet holds a WithdrawerPayrollTicket for (private auto-withdraw). */
+/** A stream the wallet holds a WithdrawerStreamTicket for (private auto-withdraw). */
 interface WithdrawerRow {
   streamId: string;
   anchor?: StreamAnchor;
@@ -27,7 +27,7 @@ interface WithdrawerRow {
 /** A known public stream (public auto-withdraw). */
 interface PublicWithdrawRow {
   streamId: string;
-  payroll?: Payroll;
+  stream?: Stream;
   anchor?: StreamAnchor;
   withdrawable?: WithdrawableAmounts;
   note?: string;
@@ -39,8 +39,8 @@ function anchorStatus(anchor: StreamAnchor): string {
   return "active";
 }
 
-export default function AdminPage({ payroll }: { payroll: UsePayroll }) {
-  const { busy, runTx, service, address } = payroll;
+export default function AdminPage({ stream }: { stream: UseStream }) {
+  const { busy, runTx, service, address } = stream;
 
   const [state, setState] = useState<ConfigState>({});
   const [readNote, setReadNote] = useState<string | null>(null);
@@ -56,9 +56,9 @@ export default function AdminPage({ payroll }: { payroll: UsePayroll }) {
     setReadNote(null);
     const next: ConfigState = {};
     try {
-      next.config = await service.getPayrollConfig(CONFIG_NAME);
+      next.config = await service.getStreamConfig(CONFIG_NAME);
     } catch {
-      setReadNote("payroll config is not initialized on-chain");
+      setReadNote("stream config is not initialized on-chain");
     }
     next.whitelisted = await service.isTokenWhitelisted(CONFIG_NAME, TOKEN_PROGRAM);
     setState(next);
@@ -72,11 +72,11 @@ export default function AdminPage({ payroll }: { payroll: UsePayroll }) {
   const refreshWithdrawLists = useCallback(async () => {
     if (service === null || address === null) return;
     setWithdrawNote(null);
-    // Private: streams the wallet holds a WithdrawerPayrollTicket for.
+    // Private: streams the wallet holds a WithdrawerStreamTicket for.
     try {
       const tickets = await service.listMyTickets();
       const rows: WithdrawerRow[] = [];
-      for (const ticket of tickets.filter((t) => t.kind === "WithdrawerPayrollTicket")) {
+      for (const ticket of tickets.filter((t) => t.kind === "WithdrawerStreamTicket")) {
         try {
           const anchor = await service.getStreamAnchor(ticket.streamId);
           let withdrawable: WithdrawableAmounts | undefined;
@@ -104,7 +104,7 @@ export default function AdminPage({ payroll }: { payroll: UsePayroll }) {
     const prows: PublicWithdrawRow[] = [];
     for (const streamId of ids) {
       try {
-        const payrollInfo = await service.getPayroll(streamId);
+        const streamInfo = await service.getStream(streamId);
         const anchor = await service.getStreamAnchor(streamId);
         let withdrawable: WithdrawableAmounts | undefined;
         try {
@@ -114,12 +114,12 @@ export default function AdminPage({ payroll }: { payroll: UsePayroll }) {
         }
         prows.push({
           streamId,
-          payroll: payrollInfo,
+          stream: streamInfo,
           anchor,
           ...(withdrawable !== undefined ? { withdrawable } : {}),
         });
       } catch {
-        prows.push({ streamId, note: "no on-chain payroll/anchor found" });
+        prows.push({ streamId, note: "no on-chain stream/anchor found" });
       }
     }
     setPublicRows(prows);
@@ -445,7 +445,7 @@ function WhitelistForm({
   onDone,
 }: {
   busy: boolean;
-  runTx: UsePayroll["runTx"];
+  runTx: UseStream["runTx"];
   onDone: () => Promise<void>;
 }) {
   const [tokenProgram, setTokenProgram] = useState(TOKEN_PROGRAM);

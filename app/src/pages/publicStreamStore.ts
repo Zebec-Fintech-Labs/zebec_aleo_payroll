@@ -1,6 +1,6 @@
 /**
  * Public streams have no ticket records for the wallet to enumerate (state
- * lives entirely in the `payrolls`/`stream_anchors` mappings, keyed by
+ * lives entirely in the `streams`/`stream_anchors` mappings, keyed by
  * `stream_id`, with no on-chain index of "streams by sender/receiver"). This
  * module remembers, per connected address, which stream ids the app has
  * created or been told about, in `localStorage`, so the UI has something to

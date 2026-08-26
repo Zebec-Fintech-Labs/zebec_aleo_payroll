@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { StreamAnchor } from "../../../sdk/types.ts";
 import type { WithdrawableAmounts } from "../../../sdk/math.ts";
-import type { UsePayroll } from "../hooks/usePayroll.ts";
+import type { UseStream } from "../hooks/useStream.ts";
 
 interface IncomingStream {
   streamId: string;
@@ -16,8 +16,8 @@ function anchorStatus(anchor: StreamAnchor): string {
   return "active";
 }
 
-export default function EmployeePage({ payroll }: { payroll: UsePayroll }) {
-  const { busy, runTx, service } = payroll;
+export default function EmployeePage({ stream }: { stream: UseStream }) {
+  const { busy, runTx, service } = stream;
   const [streams, setStreams] = useState<IncomingStream[]>([]);
   const [listNote, setListNote] = useState<string | null>(null);
 
@@ -26,7 +26,7 @@ export default function EmployeePage({ payroll }: { payroll: UsePayroll }) {
     setListNote(null);
     try {
       const tickets = await service.listMyTickets();
-      const receiverTickets = tickets.filter((t) => t.kind === "ReceiverPayrollTicket");
+      const receiverTickets = tickets.filter((t) => t.kind === "ReceiverStreamTicket");
       const rows: IncomingStream[] = [];
       for (const ticket of receiverTickets) {
         try {

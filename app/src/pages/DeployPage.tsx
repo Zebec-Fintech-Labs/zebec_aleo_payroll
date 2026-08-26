@@ -1,11 +1,11 @@
 import { useState } from "react";
-import programSource from "../../../build/test_zebec_payroll_v9/test_zebec_payroll_v9.aleo?raw";
+import programSource from "../../../build/test_zebec_stream_v1/test_zebec_stream_v1.aleo?raw";
 import { DEFAULT_FEE } from "../config.ts";
-import type { UsePayroll } from "../hooks/usePayroll.ts";
+import type { UseStream } from "../hooks/useStream.ts";
 import { parseFee } from "./form.ts";
 
-export default function DeployPage({ payroll }: { payroll: UsePayroll }) {
-  const { busy, runTx } = payroll;
+export default function DeployPage({ stream }: { stream: UseStream }) {
+  const { busy, runTx } = stream;
   const [fee, setFee] = useState(String(DEFAULT_FEE));
   const [formError, setFormError] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
@@ -36,7 +36,7 @@ export default function DeployPage({ payroll }: { payroll: UsePayroll }) {
     <section className="card">
       <h2>Deploy / upgrade program</h2>
       <p className="muted" style={{ fontSize: "0.85rem" }}>
-        Deploys <code>build/test_zebec_payroll_v9/test_zebec_payroll_v9.aleo</code> (
+        Deploys <code>build/test_zebec_stream_v1/test_zebec_stream_v1.aleo</code> (
         {programSource.length.toLocaleString()} bytes) through the wallet.
       </p>
       <form

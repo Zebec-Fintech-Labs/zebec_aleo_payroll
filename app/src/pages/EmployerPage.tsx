@@ -2,9 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { computeTopupAmount, nowSeconds } from "../../../sdk/math.ts";
 import type { CreateStreamParams, StreamAnchor } from "../../../sdk/types.ts";
 import { DEFAULT_FEE } from "../config.ts";
-import type { UsePayroll } from "../hooks/usePayroll.ts";
+import type { UseStream } from "../hooks/useStream.ts";
 import { loadKnownStreamIds, addKnownStreamId } from "./publicStreamStore.ts";
-import { WalletArc22Service } from "../payroll/WalletArc22Service.ts";
+import { WalletArc22Service } from "../stream/WalletArc22Service.ts";
 import { TOKEN_PROGRAM, TOKEN_PROGRAM_ID } from "../config.ts";
 import { fieldLiteral, parseSenderTicket } from "../../../sdk/plaintext.ts";
 import { parseBig, parseFee, randomField, requirePrefix } from "./form.ts";
@@ -28,14 +28,14 @@ function anchorStatus(anchor: StreamAnchor): string {
 interface KnownStream {
   streamId: string;
   role: "sender" | "receiver" | "other";
-  payroll?: any;
+  stream?: any;
   anchor?: StreamAnchor;
   withdrawable?: any;
   note?: string;
 }
 
-export default function EmployerPage({ payroll }: { payroll: UsePayroll }) {
-  const { busy, runTx, service, address, runAsync } = payroll;
+export default function EmployerPage({ stream }: { stream: UseStream }) {
+  const { busy, runTx, service, address, runAsync } = stream;
 
   // Tab view: "private" or "public".
   const [view, setView] = useState<"private" | "public">("private");
@@ -85,7 +85,7 @@ export default function EmployerPage({ payroll }: { payroll: UsePayroll }) {
     setListNote(null);
     try {
       const tickets = await service.listMyTickets();
-      const senderTickets = tickets.filter((t) => t.kind === "SenderPayrollTicket");
+      const senderTickets = tickets.filter((t) => t.kind === "SenderStreamTicket");
       const rows: OutgoingStream[] = [];
       for (const ticket of senderTickets) {
         let canTopup: boolean | undefined;
@@ -126,12 +126,12 @@ export default function EmployerPage({ payroll }: { payroll: UsePayroll }) {
     const rows: KnownStream[] = [];
     for (const streamId of ids) {
       try {
-        const payrollInfo = await service.getPayroll(streamId);
+        const streamInfo = await service.getStream(streamId);
         const anchor = await service.getStreamAnchor(streamId);
         const role: KnownStream["role"] =
-          payrollInfo.sender === address
+          streamInfo.sender === address
             ? "sender"
-            : payrollInfo.receiver === address
+            : streamInfo.receiver === address
               ? "receiver"
               : "other";
         let withdrawable: any | undefined;
@@ -145,12 +145,12 @@ export default function EmployerPage({ payroll }: { payroll: UsePayroll }) {
         rows.push({
           streamId,
           role,
-          payroll: payrollInfo,
+          stream: streamInfo,
           anchor,
           ...(withdrawable !== undefined ? { withdrawable } : {}),
         });
       } catch {
-        rows.push({ streamId, role: "other", note: "no on-chain payroll/anchor found" });
+        rows.push({ streamId, role: "other", note: "no on-chain stream/anchor found" });
       }
     }
     setKnownStreams(rows);
@@ -415,11 +415,11 @@ export default function EmployerPage({ payroll }: { payroll: UsePayroll }) {
   const topupablePublic = knownStreams.filter(
     (s) =>
       s.role === "sender" &&
-      s.payroll !== undefined &&
-      s.payroll.canTopup &&
+      s.stream !== undefined &&
+      s.stream.canTopup &&
       s.anchor !== undefined &&
       !s.anchor.canceled &&
-      s.anchor.depositedAmount < s.payroll.fullAmount,
+      s.anchor.depositedAmount < s.stream.fullAmount,
   );
 
   /** Human-readable quote of what the top-up will pull: debt + extra. */
@@ -485,7 +485,7 @@ export default function EmployerPage({ payroll }: { payroll: UsePayroll }) {
       return;
     }
     const row = topupablePublic.find((s) => s.streamId === selectedPublicTopup);
-    if (row?.anchor === undefined || row.payroll === undefined) {
+    if (row?.anchor === undefined || row.stream === undefined) {
       setTopupError("selected stream is missing on-chain state; refresh and retry");
       return;
     }
@@ -496,7 +496,7 @@ export default function EmployerPage({ payroll }: { payroll: UsePayroll }) {
       const programAddress = svc.getProgramAddress();
       const { topupAmount } = computeTopupAmount(
         row.anchor!,
-        row.payroll!.fullAmount,
+        row.stream!.fullAmount,
         nowSeconds(),
         extraValue,
       );
@@ -883,7 +883,7 @@ export default function EmployerPage({ payroll }: { payroll: UsePayroll }) {
           <dl className="kv">
             <dt>Token</dt>
             <dd>{TOKEN_PROGRAM}</dd>
-            <dt>Payroll program</dt>
+            <dt>Stream program</dt>
             <dd>{service !== null ? service.getProgramAddress() : "—"}</dd>
             <dt>Allowance</dt>
             <dd>{allowance !== undefined ? allowance.toString() : "?"}</dd>
@@ -971,19 +971,19 @@ export default function EmployerPage({ payroll }: { payroll: UsePayroll }) {
                       </td>
                       <td>
                         <div className="row-actions">
-                          {s.role === "sender" && s.payroll !== undefined && s.anchor !== undefined && (
+                          {s.role === "sender" && s.stream !== undefined && s.anchor !== undefined && (
                             <>
                               <button
                                 className="action secondary"
                                 onClick={() => void onPauseResumePublic(s.streamId)}
-                                disabled={busy || !s.payroll.isPausable || s.anchor.canceled}
+                                disabled={busy || !s.stream.isPausable || s.anchor.canceled}
                               >
                                 {s.anchor.paused ? "Resume" : "Pause"}
                               </button>
                               <button
                                 className="action danger"
                                 onClick={() => void onCancelPublic(s.streamId)}
-                                disabled={busy || !s.payroll.isCancelable || s.anchor.canceled}
+                                disabled={busy || !s.stream.isCancelable || s.anchor.canceled}
                               >
                                 Cancel
                               </button>
@@ -1020,7 +1020,7 @@ export default function EmployerPage({ payroll }: { payroll: UsePayroll }) {
           busy={busy}
           options={topupablePublic.map((s) => ({
             streamId: s.streamId,
-            label: `${s.streamId} · deposited ${s.anchor!.depositedAmount} of ${s.payroll!.fullAmount}`,
+            label: `${s.streamId} · deposited ${s.anchor!.depositedAmount} of ${s.stream!.fullAmount}`,
           }))}
           selected={selectedPublicTopup}
           onSelect={setSelectedPublicTopup}
@@ -1029,7 +1029,7 @@ export default function EmployerPage({ payroll }: { payroll: UsePayroll }) {
           fee={topupFee}
           onFeeChange={setTopupFee}
           quoteText={topupQuoteText(
-            topupablePublic.find((s) => s.streamId === selectedPublicTopup)?.payroll?.fullAmount,
+            topupablePublic.find((s) => s.streamId === selectedPublicTopup)?.stream?.fullAmount,
             topupablePublic.find((s) => s.streamId === selectedPublicTopup)?.anchor,
             (() => {
               try {

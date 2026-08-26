@@ -1,12 +1,12 @@
 import { useCallback, useMemo, useState } from "react";
 import { useWallet } from "@provablehq/aleo-wallet-adaptor-react";
 import {
-  WalletPayrollService,
-  type PayrollWallet,
-} from "../payroll/WalletPayrollService.ts";
+  WalletStreamService,
+  type StreamWallet,
+} from "../stream/WalletStreamService.ts";
 
-export interface UsePayroll {
-  service: WalletPayrollService | null;
+export interface UseStream {
+  service: WalletStreamService | null;
   address: string | null;
   connected: boolean;
   busy: boolean;
@@ -16,17 +16,17 @@ export interface UsePayroll {
    * Run an async operation against the service with busy/error handling.
    * Returns the operation result, or `undefined` on error (see `error`).
    */
-  runTx: <T>(op: (service: WalletPayrollService) => Promise<T>) => Promise<T | undefined>;
+  runTx: <T>(op: (service: WalletStreamService) => Promise<T>) => Promise<T | undefined>;
   /**
    * Run any async operation (e.g. the token `WalletArc22Service` methods,
-   * which are not `WalletPayrollService` methods) with the same busy/error
+   * which are not `WalletStreamService` methods) with the same busy/error
    * handling. Returns the operation result, or `undefined` on error.
    */
   runAsync: <T>(op: () => Promise<T>) => Promise<T | undefined>;
 }
 
-/** Build a `WalletPayrollService` from the connected wallet. */
-export function usePayroll(): UsePayroll {
+/** Build a `WalletStreamService` from the connected wallet. */
+export function useStream(): UseStream {
   const {
     address,
     connected,
@@ -39,9 +39,9 @@ export function usePayroll(): UsePayroll {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const service = useMemo<WalletPayrollService | null>(() => {
+  const service = useMemo<WalletStreamService | null>(() => {
     if (!connected || address === null) return null;
-    const wallet: PayrollWallet = {
+    const wallet: StreamWallet = {
       address,
       requestRecords,
       decrypt,
@@ -49,7 +49,7 @@ export function usePayroll(): UsePayroll {
       executeDeployment,
       transactionStatus,
     };
-    return new WalletPayrollService(wallet);
+    return new WalletStreamService(wallet);
   }, [
     connected,
     address,
@@ -61,7 +61,7 @@ export function usePayroll(): UsePayroll {
   ]);
 
   const runTx = useCallback(
-    async <T,>(op: (service: WalletPayrollService) => Promise<T>): Promise<T | undefined> => {
+    async <T,>(op: (service: WalletStreamService) => Promise<T>): Promise<T | undefined> => {
       if (service === null) {
         setError("wallet is not connected");
         return undefined;
