@@ -10,7 +10,7 @@ import { Address, AleoNetworkClient, SealanceMerkleTree } from "@provablehq/sdk/
 import type { TransactionStatusResponse } from "@provablehq/aleo-types";
 import type { AleoDeployment } from "@provablehq/aleo-wallet-standard";
 
-import { whitelistKey } from "../../../sdk/hashing.ts";
+import { streamRefKey, whitelistKey } from "../../../sdk/hashing.ts";
 import {
   computeAutoWithdrawalFee,
   computeTopupAmount,
@@ -25,6 +25,8 @@ import {
   fieldLiteral,
   identLiteral,
   parseBoolLiteral,
+  parseFieldLiteral,
+  parseIntLiteral,
   parsePayroll,
   parsePayrollConfig,
   parseSenderTicket,
@@ -87,6 +89,21 @@ export interface TicketInfo {
   /** Bare digits of the stream id (no `field` suffix). */
   streamId: string;
   plaintext: string;
+}
+
+export interface PrivateStreamRef {
+  streamId: string;
+  direction: "outgoing" | "incoming";
+  ticketKind: TicketRecordName;
+  ticketPlaintext: string;
+}
+
+/** One entry of {@link WalletPayrollService.listMyPublicStreams}. */
+export interface PublicStreamEntry {
+  streamId: string;
+  direction: "outgoing" | "incoming" | "both";
+  anchor?: StreamAnchor | undefined;
+  payroll?: Payroll | undefined;
 }
 
 const TX_TIMEOUT_MS = 600_000;
@@ -695,6 +712,119 @@ export class WalletPayrollService {
       tickets.push({ kind, streamId: match[1]!, plaintext: text });
     }
     return tickets;
+  }
+
+  // =======================================================================
+  // Stream listing
+  // =======================================================================
+
+  /**
+   * List the wallet's private streams by scanning its unspent payroll ticket
+   * records — no on-chain index exists for private streams (by design:
+   * sender/receiver never touch public state). Sender tickets (ticket_type 0)
+   * are outgoing, receiver tickets (ticket_type 1) are incoming. Deduplicated
+   * per (stream id, direction); canceled streams still appear here since the
+   * sender ticket is burned on cancel — check the anchor's `canceled` flag.
+   */
+  async listMyPrivateStreams(): Promise<PrivateStreamRef[]> {
+    const streams = new Map<string, PrivateStreamRef>();
+    for (const ticket of await this.listMyTickets()) {
+      let direction: "outgoing" | "incoming";
+      if (ticket.kind === "SenderPayrollTicket") direction = "outgoing";
+      else if (ticket.kind === "ReceiverPayrollTicket") direction = "incoming";
+      else continue; // withdrawer tickets mirror existing streams
+      const key = `${ticket.streamId}:${direction}`;
+      if (!streams.has(key)) {
+        streams.set(key, {
+          streamId: ticket.streamId,
+          direction,
+          ticketKind: ticket.kind,
+          ticketPlaintext: ticket.plaintext,
+        });
+      }
+    }
+    return [...streams.values()];
+  }
+
+  /**
+   * List every public stream touching the wallet in both directions via the
+   * on-chain per-address registries (`outgoing_stream_refs` /
+   * `incoming_stream_refs`), hydrated with anchor and payroll entries.
+   * Includes canceled and ended streams — filter with
+   * `anchor.canceled` / `anchor.withdrawnAmount >= payroll.fullAmount`.
+   */
+  async listMyPublicStreams(): Promise<PublicStreamEntry[]> {
+    const [outIds, inIds] = await Promise.all([
+      this.listRegistryStreamIds("outgoing"),
+      this.listRegistryStreamIds("incoming"),
+    ]);
+    const byId = new Map<string, PublicStreamEntry>();
+    for (const streamId of outIds) {
+      byId.set(streamId, { streamId, direction: "outgoing" });
+    }
+    for (const streamId of inIds) {
+      const existing = byId.get(streamId);
+      if (existing) existing.direction = "both";
+      else byId.set(streamId, { streamId, direction: "incoming" });
+    }
+    const entries = [...byId.values()];
+    await Promise.all(
+      entries.map(async (entry) => {
+        entry.anchor = await this.getStreamAnchor(entry.streamId).catch(() => undefined);
+        entry.payroll = await this.getPayroll(entry.streamId).catch(() => undefined);
+      }),
+    );
+    return entries;
+  }
+
+  /**
+   * Combined listing: public streams from the on-chain registries plus
+   * private streams from wallet record scanning. Public entries carry their
+   * anchor/payroll; private entries carry the decrypted ticket plaintext.
+   */
+  async listMyStreams(): Promise<{
+    publicStreams: PublicStreamEntry[];
+    privateStreams: PrivateStreamRef[];
+  }> {
+    const [publicStreams, privateStreams] = await Promise.all([
+      this.listMyPublicStreams(),
+      this.listMyPrivateStreams(),
+    ]);
+    return { publicStreams, privateStreams };
+  }
+
+  /**
+   * Read one registry (`outgoing` / `incoming`) for the wallet's address and
+   * return all referenced stream ids in creation order.
+   */
+  private async listRegistryStreamIds(
+    direction: "outgoing" | "incoming",
+  ): Promise<string[]> {
+    const account = this.wallet.address;
+    let count = 0n;
+    try {
+      const raw = await this.networkClient.getProgramMappingValue(
+        PROGRAM_ID,
+        `${direction}_stream_counts`,
+        account,
+      );
+      if (raw) count = parseIntLiteral(raw);
+    } catch {
+      return [];
+    }
+    const ids: string[] = [];
+    for (let i = 0n; i < count; i++) {
+      const raw = await this.networkClient.getProgramMappingValue(
+        PROGRAM_ID,
+        `${direction}_stream_refs`,
+        streamRefKey(account, i),
+      );
+      if (!raw) {
+        throw new Error(`missing ${direction} stream ref for ${account} at index ${i}`);
+      }
+      ids.push(parseFieldLiteral(raw));
+    }
+    return ids;
   }
 
   // =======================================================================
