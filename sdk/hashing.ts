@@ -73,6 +73,15 @@ export function tokenAllowanceKey(owner: string, spender: string): string {
 }
 
 /**
+ * Mapping key of `outgoing_stream_refs` / `incoming_stream_refs` for
+ * `(account, index)` — BHP256 hash of the
+ * `StreamRefKey { account: address, index: u64 }` struct.
+ */
+export function streamRefKey(account: string, index: bigint | number): string {
+  return hashPlaintextToField(`{ account: ${account}, index: ${index}u64 }`);
+}
+
+/**
  * The message the config admin signs for a `StreamTokenFee` — must equal
  * `BHP256::hash_to_field(token_fee)` as computed on-chain by
  * `finalize_create_stream`. Returns the canonical field literal.

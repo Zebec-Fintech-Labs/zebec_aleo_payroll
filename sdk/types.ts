@@ -154,6 +154,19 @@ export interface MerkleProof {
   leafIndex: number;
 }
 
+/** Relationship of an account to a listed stream. */
+export type StreamDirection = "outgoing" | "incoming" | "both";
+
+/** One entry of {@link PayrollClient.listPublicStreams}. */
+export interface ListedStream {
+  streamId: string;
+  direction: StreamDirection;
+  /** On-chain anchor; `undefined` when the anchor read fails. */
+  anchor?: StreamAnchor | undefined;
+  /** Public payroll entry; `undefined` for private streams or failed reads. */
+  payroll?: Payroll | undefined;
+}
+
 /** Options for constructing a {@link PayrollClient}. */
 export interface PayrollClientOptions {
   /** API host. Defaults to the testnet explorer API. */

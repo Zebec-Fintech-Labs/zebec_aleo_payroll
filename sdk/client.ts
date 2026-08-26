@@ -11,7 +11,7 @@ import {
   type RecordPlaintext,
 } from "@provablehq/sdk/testnet.js";
 
-import { tokenAllowanceKey, whitelistKey } from "./hashing.js";
+import { streamRefKey, tokenAllowanceKey, whitelistKey } from "./hashing.js";
 import {
   computeAutoWithdrawalFee,
   computeTopupAmount,
@@ -26,6 +26,7 @@ import {
   identLiteral,
   merkleProofsToPlaintext,
   parseBoolLiteral,
+  parseFieldLiteral,
   parseIntLiteral,
   parsePayroll,
   parsePayrollConfig,
@@ -42,6 +43,7 @@ import type {
   Config,
   CreateStreamParams,
   ExecuteOptions,
+  ListedStream,
   MerkleProof,
   Payroll,
   PayrollClientOptions as PayrollServiceOptions,
@@ -484,7 +486,6 @@ export class PayrollService {
   // =======================================================================
   // Reads (mapping queries)
   // =======================================================================
-
   /** Read and parse `stream_anchors[streamId]`. */
   async getStreamAnchor(streamId: string | bigint): Promise<StreamAnchor> {
     const value = await this.networkClient.getProgramMappingValue(
@@ -601,6 +602,149 @@ export class PayrollService {
       currentlyWithdrawable:
         currentlyWithdrawable <= available ? currentlyWithdrawable : available,
     };
+  }
+
+  // =======================================================================
+  // Reads (per-address public stream registries)
+  // =======================================================================
+
+  /**
+   * Number of public streams ever created by `account`, from the
+   * `outgoing_stream_counts` mapping. Returns `0n` when unset.
+   */
+  async getOutgoingStreamCount(account: string): Promise<bigint> {
+    return this.getRegistryCount("outgoing_stream_counts", account);
+  }
+
+  /**
+   * Number of public streams ever received by `account`, from the
+   * `incoming_stream_counts` mapping. Returns `0n` when unset.
+   */
+  async getIncomingStreamCount(account: string): Promise<bigint> {
+    return this.getRegistryCount("incoming_stream_counts", account);
+  }
+
+  /**
+   * The stream id at slot `index` of `account`'s outgoing registry
+   * (`outgoing_stream_refs`), or `undefined` when the slot is absent.
+   */
+  async getOutgoingStreamRef(
+    account: string,
+    index: bigint | number,
+  ): Promise<string | undefined> {
+    return this.getRegistryRef("outgoing_stream_refs", account, index);
+  }
+
+  /**
+   * The stream id at slot `index` of `account`'s incoming registry
+   * (`incoming_stream_refs`), or `undefined` when the slot is absent.
+   */
+  async getIncomingStreamRef(
+    account: string,
+    index: bigint | number,
+  ): Promise<string | undefined> {
+    return this.getRegistryRef("incoming_stream_refs", account, index);
+  }
+
+  /**
+   * List all public stream ids ever created by `account` (outgoing registry,
+   * in creation order). Includes canceled and ended streams — filter via
+   * {@link PayrollService.getStreamAnchor}.
+   */
+  async listOutgoingStreamIds(account: string): Promise<string[]> {
+    const count = await this.getOutgoingStreamCount(account);
+    const ids: string[] = [];
+    for (let i = 0n; i < count; i++) {
+      const ref = await this.getOutgoingStreamRef(account, i);
+      if (ref === undefined) {
+        throw new Error(`missing outgoing stream ref for ${account} at index ${i}`);
+      }
+      ids.push(ref);
+    }
+    return ids;
+  }
+
+  /**
+   * List all public stream ids ever received by `account` (incoming registry,
+   * in creation order). Includes canceled and ended streams.
+   */
+  async listIncomingStreamIds(account: string): Promise<string[]> {
+    const count = await this.getIncomingStreamCount(account);
+    const ids: string[] = [];
+    for (let i = 0n; i < count; i++) {
+      const ref = await this.getIncomingStreamRef(account, i);
+      if (ref === undefined) {
+        throw new Error(`missing incoming stream ref for ${account} at index ${i}`);
+      }
+      ids.push(ref);
+    }
+    return ids;
+  }
+
+  /**
+   * List every public stream touching `account` in both directions, hydrated
+   * with its anchor and (public) payroll entry. A stream where `account` is
+   * both sender and receiver appears once with `direction: "both"`. Canceled
+   * and ended streams are included; use `anchor.canceled` /
+   * `anchor.withdrawnAmount >= payroll.fullAmount` to filter.
+   */
+  async listPublicStreams(account: string): Promise<ListedStream[]> {
+    const [outIds, inIds] = await Promise.all([
+      this.listOutgoingStreamIds(account),
+      this.listIncomingStreamIds(account),
+    ]);
+    const byId = new Map<string, ListedStream>();
+    for (const id of outIds) {
+      byId.set(id, { streamId: id, direction: "outgoing" });
+    }
+    for (const id of inIds) {
+      const existing = byId.get(id);
+      if (existing) {
+        existing.direction = "both";
+      } else {
+        byId.set(id, { streamId: id, direction: "incoming" });
+      }
+    }
+    const entries = [...byId.values()];
+    await Promise.all(
+      entries.map(async (entry) => {
+        entry.anchor = await this.getStreamAnchor(entry.streamId).catch(() => undefined);
+        entry.payroll = await this.getPayroll(entry.streamId).catch(() => undefined);
+      }),
+    );
+    return entries;
+  }
+
+  private async getRegistryCount(mappingName: string, account: string): Promise<bigint> {
+    try {
+      const raw = await this.networkClient.getProgramMappingValue(
+        this.programId,
+        mappingName,
+        account,
+      );
+      if (!raw) return 0n;
+      return parseIntLiteral(raw);
+    } catch {
+      return 0n;
+    }
+  }
+
+  private async getRegistryRef(
+    mappingName: string,
+    account: string,
+    index: bigint | number,
+  ): Promise<string | undefined> {
+    try {
+      const raw = await this.networkClient.getProgramMappingValue(
+        this.programId,
+        mappingName,
+        streamRefKey(account, index),
+      );
+      if (!raw) return undefined;
+      return parseFieldLiteral(raw);
+    } catch {
+      return undefined;
+    }
   }
 
   // =======================================================================

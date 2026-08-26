@@ -39,6 +39,7 @@ export {
   configNameToField,
   whitelistKey,
   tokenAllowanceKey,
+  streamRefKey,
   streamTokenFeeMessage,
   tokenPriceMessage, // @deprecated
 } from "./hashing.js";
@@ -77,6 +78,7 @@ export type {
   Config,
   CreateStreamParams,
   ExecuteOptions,
+  ListedStream,
   MerkleProof,
   Payroll,
   PayrollClientOptions,
@@ -84,6 +86,7 @@ export type {
   ReceiverTicket,
   SenderTicket,
   StreamAnchor,
+  StreamDirection,
   StreamTokenFee,
   WithdrawerTicket,
   TokenPrice, // @deprecated alias for StreamTokenFee
