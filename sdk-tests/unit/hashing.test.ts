@@ -3,6 +3,7 @@ import { describe, it } from "mocha";
 
 import {
   configNameToField,
+  streamRefKey,
   streamTokenFeeMessage,
   whitelistKey,
 } from "../../sdk/hashing.js";
@@ -87,5 +88,38 @@ describe("configNameToField", () => {
     assert.equal(a, configNameToField("zebec-payroll"));
     assert.match(a, /^\d+field$/);
     assert.notEqual(a, configNameToField("other-name"));
+  });
+});
+
+// Known vectors produced with `leo run` against a scratch program computing
+// `BHP256::hash_to_field(StreamRefKey { account, index })` (Leo 4.4.1).
+const REF_KEY_ADDRESS =
+  "aleo12czxn500cyj9a7lweuft6r4rrckthfck5k8440qh7atgrnt5kupqsfh038";
+const REF_KEY_VECTORS: [bigint, string][] = [
+  [
+    0n,
+    "6952482170506173380307286405035580171476052413684863500439649736209321408776field",
+  ],
+  [
+    1n,
+    "827741355657143112373889307632514086180020658795105758901897300037779376808field",
+  ],
+  [
+    2n,
+    "4979863279181455851194491847508194138868336570890026078327554019653612308577field",
+  ],
+];
+
+describe("hashing — StreamRefKey (known on-chain vectors)", () => {
+  it("streamRefKey reproduces the on-chain registry keys", () => {
+    for (const [index, expected] of REF_KEY_VECTORS) {
+      assert.equal(streamRefKey(REF_KEY_ADDRESS, index), expected);
+    }
+  });
+
+  it("different indices produce different keys", () => {
+    const [, a] = REF_KEY_VECTORS[0]!;
+    const [, b] = REF_KEY_VECTORS[1]!;
+    assert.notEqual(a, b);
   });
 });
