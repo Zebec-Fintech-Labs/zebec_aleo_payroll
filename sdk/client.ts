@@ -1,5 +1,5 @@
 /**
- * `StreamClient` — high-level interface to the `test_zebec_stream_v1.aleo` program:
+ * `StreamClient` — high-level interface to the `test_zebec_stream_v2.aleo` program:
  * stream lifecycle operations, admin configuration, and mapping reads.
  */
 
@@ -55,7 +55,7 @@ import type { WithdrawableAmounts } from "./math.js";
 import type { TicketRecordName } from "./records.js";
 
 export const DEFAULT_ENDPOINT = "https://api.explorer.provable.com/v1";
-export const PROGRAM_ID = "test_zebec_stream_v1.aleo";
+export const PROGRAM_ID = "test_zebec_stream_v2.aleo";
 
 export class StreamService {
   readonly programId: string;

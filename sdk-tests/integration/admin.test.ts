@@ -45,7 +45,7 @@ const HOST = process.env.ENDPOINT ?? DEFAULT_ENDPOINT;
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 const PROGRAM_SOURCE = readFileSync(
-  path.resolve(here, "../../build/test_zebec_stream_v1/test_zebec_stream_v1.aleo"),
+    path.resolve(here, "../../build/test_zebec_stream_v2/test_zebec_stream_v2.aleo"),
   "utf8",
 );
 

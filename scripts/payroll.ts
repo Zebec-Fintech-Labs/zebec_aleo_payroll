@@ -71,7 +71,7 @@ const FREEZE_LIST_URL =
 const here = path.dirname(fileURLToPath(import.meta.url));
 // console.log("Current directory:", here);
 const PROGRAM_SOURCE = fs.readFileSync(
-    path.resolve(here, "../build/test_zebec_stream_v1/test_zebec_stream_v1.aleo"),
+    path.resolve(here, "../build/test_zebec_stream_v2/test_zebec_stream_v2.aleo"),
     "utf8",
 );
 

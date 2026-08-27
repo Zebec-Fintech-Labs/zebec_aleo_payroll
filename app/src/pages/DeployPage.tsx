@@ -1,5 +1,5 @@
 import { useState } from "react";
-import programSource from "../../../build/test_zebec_stream_v1/test_zebec_stream_v1.aleo?raw";
+import programSource from "../../../build/test_zebec_stream_v2/test_zebec_stream_v2.aleo?raw";
 import { DEFAULT_FEE } from "../config.ts";
 import type { UseStream } from "../hooks/useStream.ts";
 import { parseFee } from "./form.ts";
@@ -36,7 +36,7 @@ export default function DeployPage({ stream }: { stream: UseStream }) {
     <section className="card">
       <h2>Deploy / upgrade program</h2>
       <p className="muted" style={{ fontSize: "0.85rem" }}>
-        Deploys <code>build/test_zebec_stream_v1/test_zebec_stream_v1.aleo</code> (
+        Deploys <code>build/test_zebec_stream_v2/test_zebec_stream_v2.aleo</code> (
         {programSource.length.toLocaleString()} bytes) through the wallet.
       </p>
       <form

@@ -1,5 +1,5 @@
 /**
- * TypeScript mirrors of the Leo structs in `test_zebec_stream_v1.aleo` (see
+ * TypeScript mirrors of the Leo structs in `test_zebec_stream_v2.aleo` (see
  * `src/main.leo` at the repository root) plus SDK option types.
  *
  * Conventions used across the SDK:
@@ -171,12 +171,12 @@ export interface ListedStream {
 export interface StreamClientOptions {
   /** API host. Defaults to the testnet explorer API. */
   host?: string;
-  /** Program id. Defaults to `test_zebec_stream_v1.aleo`. */
+  /** Program id. Defaults to `test_zebec_stream_v2.aleo`. */
   programId?: string;
   /** Private key of the transacting account (`APrivateKey1...`). */
   privateKey?: string;
   /**
-   * Compiled program source (`build/test_zebec_stream_v1/test_zebec_stream_v1.aleo`). When
+   * Compiled program source (`build/test_zebec_stream_v2/test_zebec_stream_v2.aleo`). When
    * provided, it is used for executions instead of fetching the (deployed)
    * program from the network — useful before the program is deployed.
    */
