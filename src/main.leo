@@ -288,8 +288,6 @@ program test_zebec_stream_v1.aleo {
         let caller: address = std::ctx::caller();
         let self_address: address = std::ctx::addr();
 
-        assert_create_params(params);
-        
         let stream_id = params.stream_id;
         let receiver = params.receiver;
         let start_now = params.start_now;
@@ -302,6 +300,9 @@ program test_zebec_stream_v1.aleo {
         let initial_buffer_amount = params.initial_buffer_amount;
         let withdraw_frequency = params.withdraw_frequency;
         let auto_withdrawable = params.auto_withdrawable;
+
+        assert_create_params(params);
+        assert(caller != receiver);
 
         let deposit_amount: u128 = can_topup ? initial_buffer_amount : amount;
 
@@ -804,6 +805,8 @@ program test_zebec_stream_v1.aleo {
         let self_address: address = std::ctx::addr();
 
         assert_create_params(params);
+
+        assert(caller != params.receiver);
 
         let deposit_amount: u128 = params.can_topup ? params.initial_buffer_amount : params.amount;
 
