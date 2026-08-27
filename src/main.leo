@@ -480,7 +480,7 @@ program test_zebec_stream_v1.aleo {
         ticket_record: SenderStreamTicket,
         stream_anchor: StreamAnchor,
         now: i64,
-    ) -> (dyn record, dyn record, dyn record, dyn record, Final) {
+    ) -> (SenderStreamTicket, dyn record, dyn record, dyn record, dyn record, Final) {
         let caller: address = std::ctx::caller();
 
         // Check: caller is the sender stream ticket owner.
@@ -526,10 +526,11 @@ program test_zebec_stream_v1.aleo {
             );
 
         let stream_id = ticket_record.stream_id;
-        // The sender ticket (ticket_record) is consumed and not re-emitted —
-        // it is burned here, making the cancel terminal for the sender.
+        // The sender ticket (ticket_record) is re-emmitted but cannot be use again for cancelling
+        // as assert(!stream_anchor.canceled); prevents user from canceling again after first success.
+        let sender_ticket = SenderStreamTicket { ..ticket_record };
 
-        return (comp_a, token_a, comp_b, token_b, final {
+        return (sender_ticket, comp_a, token_a, comp_b, token_b, final {
             let real_now = std::ctx::block_timestamp();
             // Check: caller-supplied `now` is within 2 minutes (NOW_TOLERANCE) of block time.
             assert_within_tolerance(real_now, now);
