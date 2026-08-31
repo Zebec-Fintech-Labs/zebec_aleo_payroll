@@ -170,7 +170,7 @@ struct StreamTokenFee {
     // Stream token identifier.
     stream_token: identifier,
     // Admin-signed stream fee amount in microcredits.
-    stream_fee_amount: u64,
+    stream_fee_amount: u128,
     // Expiry of this signed fee object.
     expiry: i64,
     // Unique nonce — consumed on-chain to prevent replay.
@@ -291,7 +291,19 @@ program test_zebec_stream_v2.aleo {
         credit_input_record: credits.aleo::credits,
         token_input_record: dyn record,
         sender_merkle_proofs: [MerkleProof; 2]
-    ) -> (SenderStreamTicket, ReceiverStreamTicket, WithdrawerStreamTicket, credits.aleo::credits, dyn record, dyn record, Final) {
+    ) -> (
+        SenderStreamTicket, 
+        ReceiverStreamTicket, 
+        WithdrawerStreamTicket, 
+        credits.aleo::credits, 
+        credits.aleo::credits, 
+        dyn record,
+        dyn record,
+        dyn record,
+        dyn record,
+        dyn record,
+        Final
+    ) {
         let caller: address = std::ctx::caller();
         let self_address: address = std::ctx::addr();
 
@@ -324,29 +336,24 @@ program test_zebec_stream_v2.aleo {
             ? compute_auto_withdrawal_fee(duration, safe_frequency, config.base_fee, config.platform_fee)
             : 0u64;
 
-        // Credit record must cover the auto-withdrawal fee, the stream fee,
-        // and the 10_000 microcredit burn from credits.aleo::split.
-        assert(credit_input_record.microcredits >= auto_withdrawal_fee + token_fee.stream_fee_amount + SPLIT_FEE);
+        // Credit record must cover the auto-withdrawal fee
+        assert(credit_input_record.microcredits >= auto_withdrawal_fee);
 
         let (change1, change2): (credits.aleo::credits, credits.aleo::credits) =
-            credits.aleo::split(credit_input_record, auto_withdrawal_fee);
+            credits.aleo::transfer_private(credit_input_record, config.withdrawer, auto_withdrawal_fee);
 
-        // `auto_change` is a 0-value remainder (change1 == auto_withdrawal_fee)
-        // and is intentionally not re-emitted; discarding a 0-value record does
-        // not burn any economic value.
-        let (auto_change, f_auto_withdrawal_fee_transfer): (credits.aleo::credits, Final) =
-            credits.aleo::transfer_private_to_public(change1, config.withdrawer, auto_withdrawal_fee);
+        // these changes with be consumed so, no need to return them.
+        let (token_change1, token_change2): (dyn record, dyn record) =
+            IARC22@(token_program)::split(token_input_record, token_fee.stream_fee_amount);
+        
+        let (comp1, token_change3, token_change4, f_stream_fee_transfer): (dyn record, dyn record, dyn record, Final) =
+            IARC22@(token_program)::transfer_private(
+                config.fee_vault, token_fee.stream_fee_amount, token_change1, sender_merkle_proofs
+            );
 
-        // Return `fee_change` (the ALEO balance beyond fees) to the caller so
-        // no value is burned.
-        let (fee_change, f_stream_fee_transfer): (credits.aleo::credits, Final) =
-            credits.aleo::transfer_private_to_public(change2, config.fee_vault, token_fee.stream_fee_amount);
-
-        // Return the token change and compliance record to the caller;
-        // discarding them would destroy value.
-        let (deposit_comp, deposit_change, f_deposit_amount_transfer): (dyn record, dyn record, Final) =
+        let (comp2, token_change5, f_deposit_amount_transfer): (dyn record, dyn record, Final) =
             IARC22@(token_program)::transfer_private_to_public(
-                self_address, deposit_amount, token_input_record, sender_merkle_proofs
+                self_address, deposit_amount, token_change2, sender_merkle_proofs
             );
 
         let sender_ticket = SenderStreamTicket {
@@ -386,7 +393,8 @@ program test_zebec_stream_v2.aleo {
             auto_withdrawable: auto_withdrawable,
         };
 
-        return (sender_ticket, receiver_ticket, withdrawer_ticket, fee_change, deposit_change, deposit_comp, final {
+        return (sender_ticket, receiver_ticket, withdrawer_ticket, change1, change2, 
+        comp1, token_change3, token_change4, comp2, token_change5, final {
             let now: i64 = std::ctx::block_timestamp();
 
             // Checks: stream parameter validation.
@@ -439,7 +447,6 @@ program test_zebec_stream_v2.aleo {
 
             stream_anchors.set(stream_id, stream_anchor);
 
-            f_auto_withdrawal_fee_transfer.run();
             f_stream_fee_transfer.run();
             f_deposit_amount_transfer.run();
         });
@@ -827,11 +834,11 @@ program test_zebec_stream_v2.aleo {
             : 0u64;
 
         // ALEO fees are paid from the caller's public credits balance.
-        let f_stream_fee_transfer: Final =
-            credits.aleo::transfer_public_as_signer(config.fee_vault, token_fee.stream_fee_amount);
         let f_auto_withdrawal_fee_transfer: Final =
             credits.aleo::transfer_public_as_signer(config.withdrawer, auto_withdrawal_fee);
 
+        let f_stream_fee_transfer: Final =
+            IARC22@(token_program)::transfer_from_public(caller, config.fee_vault, token_fee.stream_fee_amount);
         // Pull the token deposit into the program's public balance.
         let f_deposit_transfer: Final =
             IARC22@(token_program)::transfer_from_public(caller, self_address, deposit_amount);
