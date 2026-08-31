@@ -109,7 +109,6 @@ struct StreamConfig {
     base_fee: u64,
     // fee for auto withdrawal platform service
     platform_fee: u64,
-    initialized: bool,
 }
 
 struct Stream {
@@ -125,7 +124,6 @@ struct Stream {
     auto_withdrawable: bool,
     can_topup: bool,
     topup_count: u64,
-    initialized: bool,
 }
 
 struct StreamAnchor {
@@ -141,7 +139,6 @@ struct StreamAnchor {
     withdrawn_amount: u128,
     is_public: bool,
     created_timestamp: i64,
-    initialized: bool,
 }
 
 struct CreateStreamParams {
@@ -442,7 +439,6 @@ program test_zebec_stream_v2.aleo {
                 withdrawn_amount: 0u128,
                 is_public: false,
                 created_timestamp: now,
-                initialized: true,
             };
 
             stream_anchors.set(stream_id, stream_anchor);
@@ -500,7 +496,6 @@ program test_zebec_stream_v2.aleo {
         // Check: caller is the sender stream ticket owner.
         assert(caller == ticket_record.owner);
         assert(ticket_record.is_cancelable);
-        assert(stream_anchor.initialized);
         assert(stream_anchor.stream_id == ticket_record.stream_id);
         assert(!stream_anchor.canceled);
         assert(!stream_anchor.is_public);
@@ -587,7 +582,6 @@ program test_zebec_stream_v2.aleo {
         assert(caller == ticket_record.owner);
         // Check: stream was created with top-up enabled.
         assert(ticket_record.can_topup);
-        assert(stream_anchor.initialized);
         assert(stream_anchor.stream_id == ticket_record.stream_id);
         assert(!stream_anchor.canceled);
         assert(!stream_anchor.is_public);
@@ -668,7 +662,6 @@ program test_zebec_stream_v2.aleo {
 
         // Check: caller is the receiver stream ticket owner.
         assert(caller == ticket_record.owner);
-        assert(stream_anchor.initialized);
         assert(stream_anchor.start_time <= now);
         assert(!stream_anchor.canceled);
         assert(!stream_anchor.is_public);
@@ -744,7 +737,6 @@ program test_zebec_stream_v2.aleo {
         assert(ticket_record.config == config.config_name);
         // Check: stream was created with auto-withdrawal enabled.
         assert(ticket_record.auto_withdrawable);
-        assert(stream_anchor.initialized);
         assert(stream_anchor.start_time <= now);
         assert(!stream_anchor.canceled);
         assert(!stream_anchor.is_public);
@@ -893,7 +885,6 @@ program test_zebec_stream_v2.aleo {
                 withdrawn_amount: 0u128,
                 is_public: true,
                 created_timestamp: now,
-                initialized: true,
             };
 
             stream_anchors.set(params.stream_id, stream_anchor);
@@ -911,7 +902,6 @@ program test_zebec_stream_v2.aleo {
                 can_topup: params.can_topup,
                 topup_count: params.can_topup ? 1u64 : 0u64, // initial buffer counts as first top-up
                 auto_withdrawable: params.auto_withdrawable,
-                initialized: true,
             };
             streams.set(params.stream_id, stream);
 
@@ -978,8 +968,6 @@ program test_zebec_stream_v2.aleo {
     ) -> Final {
         let caller: address = std::ctx::caller();
 
-        assert(stream.initialized);
-        assert(stream_anchor.initialized);
         // Check: caller is the sender.
         assert(caller == stream.sender);
         assert(stream.is_cancelable);
@@ -1058,8 +1046,6 @@ program test_zebec_stream_v2.aleo {
         let self_address: address = std::ctx::addr();
 
         // Check: caller is the stream sender.
-        assert(stream.initialized);
-        assert(stream_anchor.initialized);
         assert(caller == stream.sender);
         // Check: stream was created with top-up enabled.
         assert(stream.can_topup);
@@ -1146,11 +1132,9 @@ program test_zebec_stream_v2.aleo {
         let caller: address = std::ctx::caller();
 
         // Check: caller is the stream receiver.
-        assert(stream.initialized);
         assert(caller == stream.receiver);
         assert(stream.stream_id == stream_anchor.stream_id);
         // Check: Stream has started
-        assert(stream_anchor.initialized);
         assert(stream_anchor.start_time <= now);
         assert(!stream_anchor.canceled);
         assert(stream_anchor.is_public);
@@ -1223,12 +1207,10 @@ program test_zebec_stream_v2.aleo {
         // opted into auto-withdraw. Binding stream.config prevents a
         // foreign config (with the attacker as withdrawer) from authorizing.
         assert(caller == config.withdrawer);
-        assert(stream.initialized); 
         assert(stream.config == config.config_name);
         assert(stream.auto_withdrawable);
         assert(stream.stream_id == stream_anchor.stream_id);
         // Check: Stream has started
-        assert(stream_anchor.initialized);
         assert(stream_anchor.start_time <= now);
         assert(!stream_anchor.canceled);
         assert(stream_anchor.is_public);
@@ -1356,7 +1338,6 @@ program test_zebec_stream_v2.aleo {
                     withdrawer: withdrawer,
                     base_fee: base_fee,
                     platform_fee: platform_fee,
-                    initialized: true,
                 },
             );
         };
@@ -1374,7 +1355,6 @@ program test_zebec_stream_v2.aleo {
         return final {
             let config: StreamConfig = stream_configs.get(config_name);
             assert(config.admin == caller);
-            assert(config.initialized);
             stream_configs.set(
                 config_name,
                 StreamConfig {
@@ -1383,7 +1363,6 @@ program test_zebec_stream_v2.aleo {
                     withdrawer: withdrawer,
                     base_fee: base_fee,
                     platform_fee: platform_fee,
-                    initialized: true,
                 },
             );
         };
@@ -1486,7 +1465,6 @@ fn assert_stream_anchor_eq(provided: StreamAnchor, onchain: StreamAnchor) {
     assert(onchain.withdrawn_amount == provided.withdrawn_amount);
     assert(onchain.is_public == provided.is_public);
     assert(onchain.created_timestamp == provided.created_timestamp);
-    assert(onchain.initialized == provided.initialized);
 }
 
 // Assert every field of `provided` stream matches `onchain`.
