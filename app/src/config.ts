@@ -1,7 +1,7 @@
 import { configNameToField } from "../../sdk/hashing.ts";
 
 /** Stream program on testnet. */
-export const PROGRAM_ID = "test_zebec_stream_v2.aleo";
+export const PROGRAM_ID = "test_zebec_stream_v3.aleo";
 /** Testnet explorer API host (mapping reads, tx confirmation fallback). */
 export const HOST = "https://api.explorer.provable.com/v1";
 /** Freeze list of the IARC22 token program (compliance proofs). */

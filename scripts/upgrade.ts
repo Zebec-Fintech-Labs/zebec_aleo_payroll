@@ -19,7 +19,7 @@ const HOST = "https://api.explorer.provable.com/v1";
 const here = path.dirname(fileURLToPath(import.meta.url));
 // console.log("Current directory:", here);
 const PROGRAM_SOURCE = fs.readFileSync(
-    path.resolve(here, "../build/test_zebec_stream_v2/test_zebec_stream_v2.aleo"),
+    path.resolve(here, "../build/test_zebec_stream_v3/test_zebec_stream_v3.aleo"),
     "utf8",
 );
 // console.log("Program source loaded:\n", PROGRAM_SOURCE, "\n");

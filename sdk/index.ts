@@ -1,5 +1,5 @@
 /**
- * zebec-stream-sdk — TypeScript SDK for the `test_zebec_stream_v2.aleo` program.
+ * zebec-stream-sdk — TypeScript SDK for the `test_zebec_stream_v3.aleo` program.
  */
 
 export {
