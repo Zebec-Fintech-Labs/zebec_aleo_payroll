@@ -80,10 +80,17 @@ struct WhitelistKey {
 
 // One slot of a per-address stream registry. Hashed with BHP256 to form the
 // `outgoing_stream_refs` / `incoming_stream_refs` mapping keys so streams can
-// be listed per sender/receiver (public streams only).
+// be listed per sender/receiver per config (public streams only).
 struct StreamRefKey {
     account: address,
+    config: field,
     index: u64,
+}
+
+// Composite key for per-config stream counts (hashed to field for mapping key).
+struct StreamCountKey {
+    account: address,
+    config: field,
 }
 
 // Program configuration. Multiple configs live in this program's
@@ -102,7 +109,6 @@ struct StreamConfig {
     base_fee: u64,
     // fee for auto withdrawal platform service
     platform_fee: u64,
-    initialized: bool,
 }
 
 struct Stream {
@@ -118,7 +124,6 @@ struct Stream {
     auto_withdrawable: bool,
     can_topup: bool,
     topup_count: u64,
-    initialized: bool,
 }
 
 struct StreamAnchor {
@@ -134,7 +139,6 @@ struct StreamAnchor {
     withdrawn_amount: u128,
     is_public: bool,
     created_timestamp: i64,
-    initialized: bool,
 }
 
 struct CreateStreamParams {
@@ -163,7 +167,7 @@ struct StreamTokenFee {
     // Stream token identifier.
     stream_token: identifier,
     // Admin-signed stream fee amount in microcredits.
-    stream_fee_amount: u64,
+    stream_fee_amount: u128,
     // Expiry of this signed fee object.
     expiry: i64,
     // Unique nonce — consumed on-chain to prevent replay.
@@ -222,10 +226,10 @@ program test_zebec_stream_v2.aleo {
     mapping streams: field => Stream;
     // Map of token-fee nonce => used; prevents signed-fee replay.
     mapping token_fee_nonces: field => bool;
-    // Number of public streams ever created by each sender.
-    mapping outgoing_stream_counts: address => u64;
-    // Number of public streams ever received by each receiver.
-    mapping incoming_stream_counts: address => u64;
+    // Number of public streams ever created by each sender (per config).
+    mapping outgoing_stream_counts: field => u64;
+    // Number of public streams ever received by each receiver (per config).
+    mapping incoming_stream_counts: field => u64;
     // BHP256(StreamRefKey { account, index }) => stream_id (sender registry).
     mapping outgoing_stream_refs: field => field;
     // BHP256(StreamRefKey { account, index }) => stream_id (receiver registry).
@@ -284,7 +288,19 @@ program test_zebec_stream_v2.aleo {
         credit_input_record: credits.aleo::credits,
         token_input_record: dyn record,
         sender_merkle_proofs: [MerkleProof; 2]
-    ) -> (SenderStreamTicket, ReceiverStreamTicket, WithdrawerStreamTicket, credits.aleo::credits, dyn record, dyn record, Final) {
+    ) -> (
+        SenderStreamTicket, 
+        ReceiverStreamTicket, 
+        WithdrawerStreamTicket, 
+        credits.aleo::credits, 
+        credits.aleo::credits, 
+        dyn record,
+        dyn record,
+        dyn record,
+        dyn record,
+        dyn record,
+        Final
+    ) {
         let caller: address = std::ctx::caller();
         let self_address: address = std::ctx::addr();
 
@@ -317,29 +333,24 @@ program test_zebec_stream_v2.aleo {
             ? compute_auto_withdrawal_fee(duration, safe_frequency, config.base_fee, config.platform_fee)
             : 0u64;
 
-        // Credit record must cover the auto-withdrawal fee, the stream fee,
-        // and the 10_000 microcredit burn from credits.aleo::split.
-        assert(credit_input_record.microcredits >= auto_withdrawal_fee + token_fee.stream_fee_amount + SPLIT_FEE);
+        // Credit record must cover the auto-withdrawal fee
+        assert(credit_input_record.microcredits >= auto_withdrawal_fee);
 
         let (change1, change2): (credits.aleo::credits, credits.aleo::credits) =
-            credits.aleo::split(credit_input_record, auto_withdrawal_fee);
+            credits.aleo::transfer_private(credit_input_record, config.withdrawer, auto_withdrawal_fee);
 
-        // `auto_change` is a 0-value remainder (change1 == auto_withdrawal_fee)
-        // and is intentionally not re-emitted; discarding a 0-value record does
-        // not burn any economic value.
-        let (auto_change, f_auto_withdrawal_fee_transfer): (credits.aleo::credits, Final) =
-            credits.aleo::transfer_private_to_public(change1, config.withdrawer, auto_withdrawal_fee);
+        // these changes with be consumed so, no need to return them.
+        let (token_change1, token_change2): (dyn record, dyn record) =
+            IARC22@(token_program)::split(token_input_record, token_fee.stream_fee_amount);
+        
+        let (comp1, token_change3, token_change4, f_stream_fee_transfer): (dyn record, dyn record, dyn record, Final) =
+            IARC22@(token_program)::transfer_private(
+                config.fee_vault, token_fee.stream_fee_amount, token_change1, sender_merkle_proofs
+            );
 
-        // Return `fee_change` (the ALEO balance beyond fees) to the caller so
-        // no value is burned.
-        let (fee_change, f_stream_fee_transfer): (credits.aleo::credits, Final) =
-            credits.aleo::transfer_private_to_public(change2, config.fee_vault, token_fee.stream_fee_amount);
-
-        // Return the token change and compliance record to the caller;
-        // discarding them would destroy value.
-        let (deposit_comp, deposit_change, f_deposit_amount_transfer): (dyn record, dyn record, Final) =
+        let (comp2, token_change5, f_deposit_amount_transfer): (dyn record, dyn record, Final) =
             IARC22@(token_program)::transfer_private_to_public(
-                self_address, deposit_amount, token_input_record, sender_merkle_proofs
+                self_address, deposit_amount, token_change2, sender_merkle_proofs
             );
 
         let sender_ticket = SenderStreamTicket {
@@ -379,7 +390,8 @@ program test_zebec_stream_v2.aleo {
             auto_withdrawable: auto_withdrawable,
         };
 
-        return (sender_ticket, receiver_ticket, withdrawer_ticket, fee_change, deposit_change, deposit_comp, final {
+        return (sender_ticket, receiver_ticket, withdrawer_ticket, change1, change2, 
+        comp1, token_change3, token_change4, comp2, token_change5, final {
             let now: i64 = std::ctx::block_timestamp();
 
             // Checks: stream parameter validation.
@@ -427,12 +439,10 @@ program test_zebec_stream_v2.aleo {
                 withdrawn_amount: 0u128,
                 is_public: false,
                 created_timestamp: now,
-                initialized: true,
             };
 
             stream_anchors.set(stream_id, stream_anchor);
 
-            f_auto_withdrawal_fee_transfer.run();
             f_stream_fee_transfer.run();
             f_deposit_amount_transfer.run();
         });
@@ -486,7 +496,6 @@ program test_zebec_stream_v2.aleo {
         // Check: caller is the sender stream ticket owner.
         assert(caller == ticket_record.owner);
         assert(ticket_record.is_cancelable);
-        assert(stream_anchor.initialized);
         assert(stream_anchor.stream_id == ticket_record.stream_id);
         assert(!stream_anchor.canceled);
         assert(!stream_anchor.is_public);
@@ -573,7 +582,6 @@ program test_zebec_stream_v2.aleo {
         assert(caller == ticket_record.owner);
         // Check: stream was created with top-up enabled.
         assert(ticket_record.can_topup);
-        assert(stream_anchor.initialized);
         assert(stream_anchor.stream_id == ticket_record.stream_id);
         assert(!stream_anchor.canceled);
         assert(!stream_anchor.is_public);
@@ -654,7 +662,6 @@ program test_zebec_stream_v2.aleo {
 
         // Check: caller is the receiver stream ticket owner.
         assert(caller == ticket_record.owner);
-        assert(stream_anchor.initialized);
         assert(stream_anchor.start_time <= now);
         assert(!stream_anchor.canceled);
         assert(!stream_anchor.is_public);
@@ -730,7 +737,6 @@ program test_zebec_stream_v2.aleo {
         assert(ticket_record.config == config.config_name);
         // Check: stream was created with auto-withdrawal enabled.
         assert(ticket_record.auto_withdrawable);
-        assert(stream_anchor.initialized);
         assert(stream_anchor.start_time <= now);
         assert(!stream_anchor.canceled);
         assert(!stream_anchor.is_public);
@@ -820,11 +826,11 @@ program test_zebec_stream_v2.aleo {
             : 0u64;
 
         // ALEO fees are paid from the caller's public credits balance.
-        let f_stream_fee_transfer: Final =
-            credits.aleo::transfer_public_as_signer(config.fee_vault, token_fee.stream_fee_amount);
         let f_auto_withdrawal_fee_transfer: Final =
             credits.aleo::transfer_public_as_signer(config.withdrawer, auto_withdrawal_fee);
 
+        let f_stream_fee_transfer: Final =
+            IARC22@(token_program)::transfer_from_public(caller, config.fee_vault, token_fee.stream_fee_amount);
         // Pull the token deposit into the program's public balance.
         let f_deposit_transfer: Final =
             IARC22@(token_program)::transfer_from_public(caller, self_address, deposit_amount);
@@ -879,7 +885,6 @@ program test_zebec_stream_v2.aleo {
                 withdrawn_amount: 0u128,
                 is_public: true,
                 created_timestamp: now,
-                initialized: true,
             };
 
             stream_anchors.set(params.stream_id, stream_anchor);
@@ -897,26 +902,27 @@ program test_zebec_stream_v2.aleo {
                 can_topup: params.can_topup,
                 topup_count: params.can_topup ? 1u64 : 0u64, // initial buffer counts as first top-up
                 auto_withdrawable: params.auto_withdrawable,
-                initialized: true,
             };
             streams.set(params.stream_id, stream);
 
             // Append the stream to the sender's and receiver's public stream
             // registries (append-only; canceled streams are filtered
             // client-side via the anchor state).
-            let out_idx: u64 = outgoing_stream_counts.get_or_use(caller, 0u64);
+            let out_count_key: field = BHP256::hash_to_field(StreamCountKey { account: caller, config: config.config_name });
+            let out_idx: u64 = outgoing_stream_counts.get_or_use(out_count_key, 0u64);
             outgoing_stream_refs.set(
-                BHP256::hash_to_field(StreamRefKey { account: caller, index: out_idx }),
+                BHP256::hash_to_field(StreamRefKey { account: caller, config: config.config_name, index: out_idx }),
                 params.stream_id,
             );
-            outgoing_stream_counts.set(caller, out_idx + 1u64);
+            outgoing_stream_counts.set(out_count_key, out_idx + 1u64);
 
-            let in_idx: u64 = incoming_stream_counts.get_or_use(params.receiver, 0u64);
+            let in_count_key: field = BHP256::hash_to_field(StreamCountKey { account: params.receiver, config: config.config_name });
+            let in_idx: u64 = incoming_stream_counts.get_or_use(in_count_key, 0u64);
             incoming_stream_refs.set(
-                BHP256::hash_to_field(StreamRefKey { account: params.receiver, index: in_idx }),
+                BHP256::hash_to_field(StreamRefKey { account: params.receiver, config: config.config_name, index: in_idx }),
                 params.stream_id,
             );
-            incoming_stream_counts.set(params.receiver, in_idx + 1u64);
+            incoming_stream_counts.set(in_count_key, in_idx + 1u64);
 
             f_stream_fee_transfer.run();
             f_auto_withdrawal_fee_transfer.run();
@@ -962,8 +968,6 @@ program test_zebec_stream_v2.aleo {
     ) -> Final {
         let caller: address = std::ctx::caller();
 
-        assert(stream.initialized);
-        assert(stream_anchor.initialized);
         // Check: caller is the sender.
         assert(caller == stream.sender);
         assert(stream.is_cancelable);
@@ -1042,8 +1046,6 @@ program test_zebec_stream_v2.aleo {
         let self_address: address = std::ctx::addr();
 
         // Check: caller is the stream sender.
-        assert(stream.initialized);
-        assert(stream_anchor.initialized);
         assert(caller == stream.sender);
         // Check: stream was created with top-up enabled.
         assert(stream.can_topup);
@@ -1130,11 +1132,9 @@ program test_zebec_stream_v2.aleo {
         let caller: address = std::ctx::caller();
 
         // Check: caller is the stream receiver.
-        assert(stream.initialized);
         assert(caller == stream.receiver);
         assert(stream.stream_id == stream_anchor.stream_id);
         // Check: Stream has started
-        assert(stream_anchor.initialized);
         assert(stream_anchor.start_time <= now);
         assert(!stream_anchor.canceled);
         assert(stream_anchor.is_public);
@@ -1207,12 +1207,10 @@ program test_zebec_stream_v2.aleo {
         // opted into auto-withdraw. Binding stream.config prevents a
         // foreign config (with the attacker as withdrawer) from authorizing.
         assert(caller == config.withdrawer);
-        assert(stream.initialized); 
         assert(stream.config == config.config_name);
         assert(stream.auto_withdrawable);
         assert(stream.stream_id == stream_anchor.stream_id);
         // Check: Stream has started
-        assert(stream_anchor.initialized);
         assert(stream_anchor.start_time <= now);
         assert(!stream_anchor.canceled);
         assert(stream_anchor.is_public);
@@ -1285,31 +1283,33 @@ program test_zebec_stream_v2.aleo {
     }
 
     // =========================================================================
-    // Views: per-address public stream registries
+    // Views: per-address public stream registries (per config)
     // =========================================================================
 
-    // Number of public streams ever created by `account`. Iterate
-    // `get_outgoing_stream_ref(account, 0..count)` to list them.
-    view fn get_outgoing_stream_count(account: address) -> u64 {
-        return outgoing_stream_counts.get_or_use(account, 0u64);
+    // Number of public streams ever created by `account` under `config`. Iterate
+    // `get_outgoing_stream_ref(account, config, 0..count)` to list them.
+    view fn get_outgoing_stream_count(account: address, config: field) -> u64 {
+        let key: field = BHP256::hash_to_field(StreamCountKey { account: account, config: config });
+        return outgoing_stream_counts.get_or_use(key, 0u64);
     }
 
-    // Number of public streams ever received by `account`.
-    view fn get_incoming_stream_count(account: address) -> u64 {
-        return incoming_stream_counts.get_or_use(account, 0u64);
+    // Number of public streams ever received by `account` under `config`.
+    view fn get_incoming_stream_count(account: address, config: field) -> u64 {
+        let key: field = BHP256::hash_to_field(StreamCountKey { account: account, config: config });
+        return incoming_stream_counts.get_or_use(key, 0u64);
     }
 
-    // The stream id at slot `index` of `account`'s outgoing registry, or
-    // `0field` when the slot does not exist.
-    view fn get_outgoing_stream_ref(account: address, index: u64) -> field {
-        let key: field = BHP256::hash_to_field(StreamRefKey { account: account, index: index });
+    // The stream id at slot `index` of `account`'s outgoing registry under `config`,
+    // or `0field` when the slot does not exist.
+    view fn get_outgoing_stream_ref(account: address, config: field, index: u64) -> field {
+        let key: field = BHP256::hash_to_field(StreamRefKey { account: account, config: config, index: index });
         return outgoing_stream_refs.get_or_use(key, 0field);
     }
 
-    // The stream id at slot `index` of `account`'s incoming registry, or
-    // `0field` when the slot does not exist.
-    view fn get_incoming_stream_ref(account: address, index: u64) -> field {
-        let key: field = BHP256::hash_to_field(StreamRefKey { account: account, index: index });
+    // The stream id at slot `index` of `account`'s incoming registry under `config`,
+    // or `0field` when the slot does not exist.
+    view fn get_incoming_stream_ref(account: address, config: field, index: u64) -> field {
+        let key: field = BHP256::hash_to_field(StreamRefKey { account: account, config: config, index: index });
         return incoming_stream_refs.get_or_use(key, 0field);
     }
 
@@ -1338,7 +1338,6 @@ program test_zebec_stream_v2.aleo {
                     withdrawer: withdrawer,
                     base_fee: base_fee,
                     platform_fee: platform_fee,
-                    initialized: true,
                 },
             );
         };
@@ -1356,7 +1355,6 @@ program test_zebec_stream_v2.aleo {
         return final {
             let config: StreamConfig = stream_configs.get(config_name);
             assert(config.admin == caller);
-            assert(config.initialized);
             stream_configs.set(
                 config_name,
                 StreamConfig {
@@ -1365,7 +1363,6 @@ program test_zebec_stream_v2.aleo {
                     withdrawer: withdrawer,
                     base_fee: base_fee,
                     platform_fee: platform_fee,
-                    initialized: true,
                 },
             );
         };
@@ -1468,7 +1465,6 @@ fn assert_stream_anchor_eq(provided: StreamAnchor, onchain: StreamAnchor) {
     assert(onchain.withdrawn_amount == provided.withdrawn_amount);
     assert(onchain.is_public == provided.is_public);
     assert(onchain.created_timestamp == provided.created_timestamp);
-    assert(onchain.initialized == provided.initialized);
 }
 
 // Assert every field of `provided` stream matches `onchain`.
