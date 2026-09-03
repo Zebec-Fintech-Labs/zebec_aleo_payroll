@@ -1,6 +1,11 @@
 /**
- * Stream stream lifecycle script: create -> pause -> resume -> withdraw ->
+ * Stream lifecycle script: create -> pause -> resume -> withdraw ->
  * cancel, against the `test_zebec_stream_v3.aleo` program on testnet.
+ *
+ * Transactions are executed through `createAleoWallet` — a Node `AleoWallet`
+ * that proves via the delegated proving service and scans records via the
+ * record scanner — so the script uses the exact same `StreamClient` API as
+ * the browser app.
  *
  * Prerequisites:
  * - Config `Stream_Config_001` initialized (run `npm run admin` first) and
@@ -18,28 +23,27 @@
  *   attestation (`StreamTokenFee`).
  * - SENDER_PRIVATE_KEY (required): employer/sender.
  * - RECEIVER_PRIVATE_KEY (required): employee who withdraws.
+ * - PROVER_API_KEY / PROVER_CONSUMER_ID (required): delegated proving and
+ *   record scanning credentials (see `createAleoWallet`).
  */
 
-import { Address, Field, initThreadPool, RecordPlaintext, SealanceMerkleTree } from "@provablehq/sdk/testnet.js";
+import { Field, initThreadPool } from "@provablehq/sdk/testnet.js";
 import dotenv from "dotenv";
-import path from "node:path";
-import * as fs from "node:fs";
-import { fileURLToPath } from "node:url";
-import { randomBytes } from "node:crypto";
 import { setTimeout } from "node:timers/promises";
 import {
-    Arc22Service,
     BPS_DENOMINATOR,
     computeStreamFee,
     configNameToField,
+    createAleoWallet,
     DEFAULT_FEE_BPS,
+    fromMicroUnits,
+    Network,
     nowSeconds,
     StreamClient,
-    PROGRAM_ID,
     signStreamTokenFee,
     type Config,
     type CreateStreamParams,
-    type MerkleProof,
+    type RawStreamTokenFee,
     type StreamTokenFee,
 } from "../sdk/index.js";
 
@@ -65,73 +69,47 @@ if (!RECEIVER_PRIVATE_KEY) {
     console.error("RECEIVER_PRIVATE_KEY environment variable is not set.");
     process.exit(1);
 }
-// Checked above; bind so closures (e.g. createSignedTokenPrice) see `string`.
+
 const HOST = process.env.ENDPOINT ?? "https://api.explorer.provable.com/v1";
 console.log("HOST:", HOST);
-const FREEZE_LIST_URL =
-    "https://api.explorer.provable.com/v2/testnet/programs/test_usdcx_freezelist.aleo/compliance/freeze-list";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-// console.log("Current directory:", here);
-const PROGRAM_SOURCE = fs.readFileSync(
-    path.resolve(here, "../build/test_zebec_stream_v3/test_zebec_stream_v3.aleo"),
-    "utf8",
-);
-
-const PROVER_URI = process.env.PROVER_URI || undefined;
-const PROVER_API_KEY = process.env.PROVER_API_KEY || undefined;
-const PROVER_CONSUMER_ID = process.env.PROVER_CONSUMER_ID || undefined;
-if (PROVER_URI) {
-    console.log("Using delegated proving service:", PROVER_URI);
-}
-
-const senderClient = new StreamClient({
-    host: HOST,
-    privateKey: SENDER_PRIVATE_KEY,
-    programSource: PROGRAM_SOURCE,
-    proverUri: PROVER_URI,
-    proverApiKey: PROVER_API_KEY,
-    proverConsumerId: PROVER_CONSUMER_ID,
-});
-const receiverClient = new StreamClient({
-    host: HOST,
-    privateKey: RECEIVER_PRIVATE_KEY,
-    programSource: PROGRAM_SOURCE,
-    proverUri: PROVER_URI,
-    proverApiKey: PROVER_API_KEY,
-    proverConsumerId: PROVER_CONSUMER_ID,
-});
-const sender = senderClient.account!.address().to_string();
-const receiver = receiverClient.account!.address().to_string();
+const senderWallet = await createAleoWallet(SENDER_PRIVATE_KEY, Network.TESTNET, { host: HOST });
+const receiverWallet = await createAleoWallet(RECEIVER_PRIVATE_KEY, Network.TESTNET, { host: HOST });
+const senderClient = new StreamClient(senderWallet, { host: HOST });
+const receiverClient = new StreamClient(receiverWallet, { host: HOST });
+const sender = senderWallet.address;
+const receiver = receiverWallet.address;
 console.log("Sender (employer) address:", sender);
 console.log("Receiver (employee) address:", receiver);
 
 if (sender === receiver) {
-    console.error("PRIVATE_KEY and RECEIVER_PRIVATE_KEY must be different accounts.");
+    console.error("SENDER_PRIVATE_KEY and RECEIVER_PRIVATE_KEY must be different accounts.");
     process.exit(1);
 }
 
 const CONFIG_NAME = configNameToField("Stream_Config_001");
 const TOKEN_PROGRAM = "test_usdcx_stablecoin";
+const TOKEN_DECIMALS = 6;
 const TOKEN_PRICE_USD = 1_000_000n; // $1.00 per token, 6 decimals (used for off-chain fee quote only)
 const ALEO_PRICE_USD = 200_000n;  // $0.20 per ALEO, 6 decimals (used for off-chain fee quote only)
+const PRIORITY_FEE = 100_000; // 0.1 ALEO, in microcredits
 
 const STREAM_PARAMS: CreateStreamParams = {
     receiver,
     streamId: randomField(),
-    amount: 2_000_000n,
+    amount: "2", // 2 USDCx
     startTime: 0n, // ignored: startNow is true
-    duration: 10n * 60n, // 10 minutes
+    duration: 10 * 60, // 10 minutes
     isCancelable: true,
     isPausable: true,
     autoWithdrawable: false,
-    withdrawFrequency: 0n,
+    withdrawFrequency: 0,
     startNow: true,
     canTopup: false,
-    initialBufferAmount: 0n,
+    initialBufferAmount: "0",
 };
 
-/** Random 128-bit field value (stream ids). */
+/** Random 128-bit field value (stream ids / fee nonces). */
 export function randomField(): bigint {
     const bytes = Field.random().toBytesLe();
     return BigInt(
@@ -147,83 +125,61 @@ async function waitForConfirmation(txId: string) {
     }
 }
 
-/** Read the on-chain stream config and shape it as the `Config` input. */
+/** Read the on-chain stream config in the human form the client expects. */
 async function getConfigInput(): Promise<Config> {
-    const chainConfig = await senderClient.getStreamConfig(CONFIG_NAME);
-    return {
-        configName: CONFIG_NAME,
-        admin: chainConfig.admin,
-        feeVault: chainConfig.feeVault,
-        withdrawer: chainConfig.withdrawer,
-        baseFee: chainConfig.baseFee,
-        platformFee: chainConfig.platformFee,
-    };
+    return senderClient.getStreamConfig(CONFIG_NAME);
 }
 
 /**
- * Compute the stream fee in stream-token units from the off-chain USD value
- * of the stream and the flat DEFAULT_FEE_BPS tier. The resulting amount is
- * embedded in the signed `StreamTokenFee` (a u128, denominated in the
- * streaming token) and verified on-chain via Schnorr signature.
+ * Compute the stream fee in stream-token micro-units from the off-chain USD
+ * value of the stream and the flat DEFAULT_FEE_BPS tier.
  */
-function computeSignedFeeAmount(streamAmount: bigint): bigint {
-    const { usdValue } = computeStreamFee(streamAmount, TOKEN_PRICE_USD, ALEO_PRICE_USD, DEFAULT_FEE_BPS);
+function computeSignedFeeAmount(streamAmountMicro: bigint): bigint {
+    const { usdValue } = computeStreamFee(streamAmountMicro, TOKEN_PRICE_USD, ALEO_PRICE_USD, DEFAULT_FEE_BPS);
     // feeUsd (6 decimals) converted into token units at the token's USD price.
     return (usdValue * DEFAULT_FEE_BPS * 1_000_000n) / (BPS_DENOMINATOR * TOKEN_PRICE_USD);
 }
 
-/** Build a fresh admin-signed `StreamTokenFee` attestation. */
-function createSignedTokenFee(streamAmount: bigint): { tokenFee: StreamTokenFee; signature: string } {
-    const tokenFee: StreamTokenFee = {
+/**
+ * Build a fresh admin-signed `StreamTokenFee` attestation: the raw (micro-unit)
+ * form for the Schnorr signature and the human form for the client.
+ */
+function createSignedTokenFee(streamAmountMicro: bigint): {
+    tokenFee: StreamTokenFee;
+    signature: string;
+} {
+    const streamFeeAmount = computeSignedFeeAmount(streamAmountMicro);
+    const rawFee: RawStreamTokenFee = {
         config: CONFIG_NAME,
         streamToken: TOKEN_PROGRAM,
-        streamFeeAmount: computeSignedFeeAmount(streamAmount),
+        streamFeeAmount,
         expiry: nowSeconds() + 3600n,
         nonce: randomField(),
     };
-    return { tokenFee, signature: signStreamTokenFee(ADMIN_PRIVATE_KEY!, tokenFee) };
-}
-
-/**
- * Build a Sealance Merkle exclusion proof showing the sender is NOT on the
- * token program's freeze list (required by IARC22 compliant transfers).
- */
-async function getComplianceProofs(senderAddress: string): Promise<[MerkleProof, MerkleProof]> {
-    const res = await fetch(FREEZE_LIST_URL);
-    if (!res.ok) {
-        throw new Error(`failed to fetch freeze list: ${res.status} ${res.statusText}`);
-    }
-    const sealance = new SealanceMerkleTree();
-    const tree = sealance.convertTreeToBigInt(await res.json());
-    const [leftIdx, rightIdx] = sealance.getLeafIndices(tree, senderAddress);
-    const leftProof = sealance.getSiblingPath(tree, leftIdx, 16);
-    const rightProof = sealance.getSiblingPath(tree, rightIdx, 16);
-    return [
-        { siblings: leftProof.siblings, leafIndex: leftProof.leaf_index },
-        { siblings: rightProof.siblings, leafIndex: rightProof.leaf_index },
-    ];
+    const tokenFee: StreamTokenFee = {
+        ...rawFee,
+        streamFeeAmount: fromMicroUnits(streamFeeAmount, TOKEN_DECIMALS),
+    };
+    return { tokenFee, signature: signStreamTokenFee(ADMIN_PRIVATE_KEY!, rawFee) };
 }
 
 async function createStreamPrivate(): Promise<string | bigint> {
     const params = STREAM_PARAMS;
     console.log("streamId:", params.streamId);
     const config = await getConfigInput();
-    const { tokenFee, signature } = createSignedTokenFee(params.amount);
+    const { tokenFee, signature } = createSignedTokenFee(
+        2_000_000n, // params.amount in micro units
+    );
     console.log(`Stream fee: ${tokenFee.streamFeeAmount} token units`);
-    const proofs = await getComplianceProofs(sender);
 
     const txId = await senderClient.createStreamPrivate(
         params,
         TOKEN_PROGRAM,
+        TOKEN_DECIMALS,
         config,
         tokenFee,
         signature,
-        proofs,
-        {
-            priorityFee: 0.1,
-            creditRecord: "{ owner: aleo12czxn500cyj9a7lweuft6r4rrckthfck5k8440qh7atgrnt5kupqsfh038.private, microcredits: 10000000u64.private, _nonce: 6410260858307819024593913311999508957203522779225348165403325458147180369361group.public, _version: 1u8.public }",
-            tokenRecord: "{ owner: aleo12czxn500cyj9a7lweuft6r4rrckthfck5k8440qh7atgrnt5kupqsfh038.private, amount: 40000000u128.private, _nonce: 5129322304556379667216924448175967718654626044730865730388167874744975697882group.public, _version: 1u8.public }"
-        },
+        { priorityFee: PRIORITY_FEE },
     );
     console.log("Create stream transaction ID:", txId);
     await waitForConfirmation(txId);
@@ -237,43 +193,31 @@ async function createStreamPublic(): Promise<string | bigint> {
     const params = STREAM_PARAMS;
     console.log("streamId:", params.streamId);
     const config = await getConfigInput();
-    const { tokenFee, signature } = createSignedTokenFee(params.amount);
+    const { tokenFee, signature } = createSignedTokenFee(2_000_000n);
     console.log(`Public stream fee: ${tokenFee.streamFeeAmount} token units`);
     // `create_stream_public` pulls both the deposit and the (token-denominated)
-    // stream fee via `IARC22::transfer_from_public`, which requires this stream
-    // program to be approved as the spender for the combined amount first.
-    // Check the on-chain allowance and approve if it is too low.
-    const depositAmount = params.canTopup ? params.initialBufferAmount : params.amount;
-    const requiredAllowance = depositAmount + tokenFee.streamFeeAmount;
-    const programAddress = Address.fromProgramId(PROGRAM_ID).toString();
-    const tokenService = new Arc22Service({
-        tokenProgram: TOKEN_PROGRAM,
-        privateKey: SENDER_PRIVATE_KEY,
-        host: HOST,
-        proverUri: PROVER_URI,
-        proverApiKey: PROVER_API_KEY,
-        proverConsumerId: PROVER_CONSUMER_ID,
-    });
-    const allowance = await tokenService.getAllowance(sender, programAddress);
-    if (allowance < requiredAllowance) {
-        console.log(
-            `Allowance ${allowance} < deposit + fee ${requiredAllowance}; approving ${PROGRAM_ID} for ${requiredAllowance}...`,
-        );
-        const approveTxId = await tokenService.approve(programAddress, requiredAllowance, { priorityFee: 0.1 });
-        await waitForConfirmation(approveTxId);
-        console.log("Approved stream program to spend tokens:", approveTxId);
-    } else {
-        console.log(`Allowance ${allowance} already covers deposit + fee ${requiredAllowance}; no approval needed.`);
-    }
-    // The employer must hold enough public credits for the auto-withdrawal fee
-    // (0 when auto-withdraw is disabled). No records/proofs needed.
+    // stream fee via `transfer_from_public`, so the stream program must be
+    // approved as the spender for the combined amount first.
+    const requiredAllowance = String(Number(params.amount) + Number(tokenFee.streamFeeAmount));
+    const programAddress = await senderClient.programAddress();
+    const approveTxId = await senderClient.approveTokenPublic(
+        TOKEN_PROGRAM,
+        programAddress,
+        requiredAllowance,
+        TOKEN_DECIMALS,
+        { priorityFee: PRIORITY_FEE },
+    );
+    console.log("Approved stream program to spend tokens:", approveTxId);
+    await waitForConfirmation(approveTxId);
+
     const txId = await senderClient.createStreamPublic(
         params,
         TOKEN_PROGRAM,
+        TOKEN_DECIMALS,
         config,
         tokenFee,
         signature,
-        { priorityFee: 0.1 },
+        { priorityFee: PRIORITY_FEE },
     );
     console.log("Create public stream transaction ID:", txId);
     await waitForConfirmation(txId);
@@ -286,7 +230,7 @@ async function createStreamPublic(): Promise<string | bigint> {
 }
 
 async function pauseStream(streamId: string | bigint) {
-    const txId = await senderClient.pauseResumeStream(streamId, undefined, { priorityFee: 0.1 });
+    const txId = await senderClient.pauseResumeStreamPrivate({ streamId }, { priorityFee: PRIORITY_FEE });
     console.log("Pause stream transaction ID:", txId);
     await waitForConfirmation(txId);
     await setTimeout(60000);
@@ -295,7 +239,7 @@ async function pauseStream(streamId: string | bigint) {
 }
 
 async function resumeStream(streamId: string | bigint) {
-    const txId = await senderClient.pauseResumeStream(streamId, undefined, { priorityFee: 0.1 });
+    const txId = await senderClient.pauseResumeStreamPrivate({ streamId }, { priorityFee: PRIORITY_FEE });
     console.log("Resume stream transaction ID:", txId);
     await waitForConfirmation(txId);
     await setTimeout(60000);
@@ -304,7 +248,7 @@ async function resumeStream(streamId: string | bigint) {
 }
 
 async function pauseStreamPublic(streamId: string | bigint) {
-    const txId = await senderClient.pauseResumeStreamPublic(streamId, { priorityFee: 0.1 });
+    const txId = await senderClient.pauseResumeStreamPublic({ streamId }, { priorityFee: PRIORITY_FEE });
     console.log("Pause public stream transaction ID:", txId);
     await waitForConfirmation(txId);
     await setTimeout(60000);
@@ -313,7 +257,7 @@ async function pauseStreamPublic(streamId: string | bigint) {
 }
 
 async function resumeStreamPublic(streamId: string | bigint) {
-    const txId = await senderClient.pauseResumeStreamPublic(streamId, { priorityFee: 0.1 });
+    const txId = await senderClient.pauseResumeStreamPublic({ streamId }, { priorityFee: PRIORITY_FEE });
     console.log("Resume public stream transaction ID:", txId);
     await waitForConfirmation(txId);
     await setTimeout(60000);
@@ -324,7 +268,7 @@ async function resumeStreamPublic(streamId: string | bigint) {
 async function withdraw(streamId: string | bigint) {
     const preview = await receiverClient.getWithdrawableAmounts(streamId);
     console.log("Withdrawable preview:", preview);
-    const txId = await receiverClient.withdraw(streamId, undefined, undefined, { priorityFee: 0.1 });
+    const txId = await receiverClient.withdrawStreamPrivate({ streamId }, { priorityFee: PRIORITY_FEE });
     console.log("Withdraw transaction ID:", txId);
     await waitForConfirmation(txId);
     await setTimeout(60000);
@@ -335,7 +279,7 @@ async function withdraw(streamId: string | bigint) {
 async function withdrawPublic(streamId: string | bigint) {
     const preview = await receiverClient.getWithdrawableAmounts(streamId);
     console.log("Public withdrawable preview:", preview);
-    const txId = await receiverClient.withdrawPublic(streamId, undefined, undefined, { priorityFee: 0.1 });
+    const txId = await receiverClient.withdrawStreamPublic({ streamId }, { priorityFee: PRIORITY_FEE });
     console.log("Withdraw public stream transaction ID:", txId);
     await waitForConfirmation(txId);
     await setTimeout(60000);
@@ -344,7 +288,7 @@ async function withdrawPublic(streamId: string | bigint) {
 }
 
 async function cancelStream(streamId: string | bigint) {
-    const txId = await senderClient.cancelStream(streamId, undefined, undefined, { priorityFee: 0.1 });
+    const txId = await senderClient.cancelStreamPrivate({ streamId }, { priorityFee: PRIORITY_FEE });
     console.log("Cancel stream transaction ID:", txId);
     await waitForConfirmation(txId);
     await setTimeout(60000);
@@ -353,7 +297,7 @@ async function cancelStream(streamId: string | bigint) {
 }
 
 async function cancelStreamPublic(streamId: string | bigint) {
-    const txId = await senderClient.cancelStreamPublic(streamId, undefined, undefined, { priorityFee: 0.1 });
+    const txId = await senderClient.cancelStreamPublic({ streamId }, { priorityFee: PRIORITY_FEE });
     console.log("Cancel public stream transaction ID:", txId);
     await waitForConfirmation(txId);
     await setTimeout(60000);
@@ -363,7 +307,7 @@ async function cancelStreamPublic(streamId: string | bigint) {
 
 async function main() {
     const publicMode = process.env.PUBLIC_STREAM === "1";
-    console.log("Public mode is enabled.");
+    console.log(publicMode ? "Public mode is enabled." : "Private mode is enabled.");
     let start = Date.now();
     const streamId = publicMode ? await createStreamPublic() : await createStreamPrivate();
     let end = Date.now();
@@ -408,7 +352,7 @@ async function main() {
     }
     end = Date.now();
     console.log(`Stream cancel took ${(end - start) / 1000} seconds`);
-    console.log("Stream stream lifecycle completed successfully.");
+    console.log("Stream lifecycle completed successfully.");
     console.log("Stream created with ID:", streamId);
 }
 
