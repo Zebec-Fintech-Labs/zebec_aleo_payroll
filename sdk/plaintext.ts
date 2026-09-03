@@ -3,6 +3,10 @@
  * transaction inputs and hashing preimages) and parsers for plaintext values
  * returned by mapping queries.
  *
+ * All serializers/parsers operate on the **Raw** types (bigint micro-units,
+ * bigint seconds) — the exact on-chain representation. `StreamService`
+ * converts human-facing inputs to Raw before calling them.
+ *
  * IMPORTANT: struct members are always emitted in the exact declaration order
  * of the corresponding Leo struct — `BHP256::hash_to_field` hashes the member
  * bits in declaration order, so reordering would change every derived key.
@@ -11,16 +15,16 @@
 import { Field, Plaintext } from "@provablehq/sdk/testnet.js";
 
 import type {
-  Config,
-  CreateStreamParams,
   MerkleProof,
-  Stream,
-  StreamConfig,
-  ReceiverTicket,
-  SenderTicket,
-  StreamAnchor,
-  StreamTokenFee,
-  WithdrawerTicket,
+  RawConfig,
+  RawCreateStreamParams,
+  RawStream,
+  RawStreamConfig,
+  RawReceiverTicket,
+  RawSenderTicket,
+  RawStreamAnchor,
+  RawStreamTokenFee,
+  RawWithdrawerTicket,
 } from "./types.js";
 
 /** Normalize a field value to its canonical literal form (`"123field"`). */
@@ -40,8 +44,18 @@ export function identLiteral(name: string): string {
   return `'${trimmed}'`;
 }
 
+/** Render a `u64` literal. */
+export function u64Literal(value: string | number | bigint): string {
+  return `${BigInt(value)}u64`;
+}
+
+/** Render an `i64` literal. */
+export function i64Literal(value: string | number | bigint): string {
+  return `${BigInt(value)}i64`;
+}
+
 /** Serialize a `Stream` struct to its Leo plaintext literal. */
-export function streamToPlaintext(p: Stream): string {
+export function streamToPlaintext(p: RawStream): string {
   return validated(
     `{ stream_id: ${fieldLiteral(p.streamId)}, config: ${fieldLiteral(p.config)}, ` +
     `sender: ${p.sender}, receiver: ${p.receiver}, ` +
@@ -66,7 +80,7 @@ function validated(text: string): string {
 }
 
 /** Serialize a `CreateStreamParams` struct to its Leo plaintext literal. */
-export function createStreamParamsToPlaintext(p: CreateStreamParams): string {
+export function createStreamParamsToPlaintext(p: RawCreateStreamParams): string {
   return validated(
     `{ receiver: ${p.receiver}, stream_id: ${fieldLiteral(p.streamId)}, ` +
     `amount: ${p.amount}u128, start_time: ${p.startTime}i64, ` +
@@ -80,7 +94,7 @@ export function createStreamParamsToPlaintext(p: CreateStreamParams): string {
 }
 
 /** Serialize a `Config` struct to its Leo plaintext literal. */
-export function configToPlaintext(c: Config): string {
+export function configToPlaintext(c: RawConfig): string {
   return validated(
     `{ config_name: ${fieldLiteral(c.configName)}, admin: ${c.admin}, ` +
     `fee_vault: ${c.feeVault}, withdrawer: ${c.withdrawer}, ` +
@@ -100,7 +114,7 @@ export function configToPlaintext(c: Config): string {
  *   config: field, stream_token: identifier,
  *   stream_fee_amount: u128, expiry: i64, nonce: field
  */
-export function streamTokenFeeToPlaintext(tf: StreamTokenFee): string {
+export function streamTokenFeeToPlaintext(tf: RawStreamTokenFee): string {
   return validated(
     `{ config: ${fieldLiteral(tf.config)}, ` +
     `stream_token: ${identLiteral(tf.streamToken)}, ` +
@@ -113,7 +127,7 @@ export function streamTokenFeeToPlaintext(tf: StreamTokenFee): string {
 export const tokenPriceToPlaintext = streamTokenFeeToPlaintext;
 
 /** Serialize a `StreamAnchor` struct to its Leo plaintext literal. */
-export function streamAnchorToPlaintext(a: StreamAnchor): string {
+export function streamAnchorToPlaintext(a: RawStreamAnchor): string {
   return validated(
     `{ stream_id: ${fieldLiteral(a.streamId)}, start_time: ${a.startTime}i64, ` +
     `duration: ${a.duration}u64, paused: ${boolLiteral(a.paused)}, ` +
@@ -222,7 +236,7 @@ export function parseIdentLiteral(value: string): string {
 }
 
 /** Parse a `Stream` mapping value. */
-export function parseStream(plaintext: string): Stream {
+export function parseStream(plaintext: string): RawStream {
   if (!plaintext) {
     throw new Error("value is empty: " + plaintext);
   }
@@ -243,7 +257,7 @@ export function parseStream(plaintext: string): Stream {
 }
 
 /** Parse a `StreamAnchor` mapping value. */
-export function parseStreamAnchor(plaintext: string): StreamAnchor {
+export function parseStreamAnchor(plaintext: string): RawStreamAnchor {
   if (!plaintext) {
     throw new Error("Plaintext value is empty: " + plaintext);
   }
@@ -265,7 +279,7 @@ export function parseStreamAnchor(plaintext: string): StreamAnchor {
 }
 
 /** Parse a `StreamConfig` mapping value. */
-export function parseStreamConfig(plaintext: string): StreamConfig {
+export function parseStreamConfig(plaintext: string): RawStreamConfig {
   if (!plaintext) {
     throw new Error("value is empty: " + plaintext);
   }
@@ -283,11 +297,53 @@ export function parseStreamConfig(plaintext: string): StreamConfig {
 // Ticket record parsing
 // =========================================================================
 
+/** Stream ticket record names, classified by their `ticket_type` member. */
+export type TicketRecordName =
+  | "SenderStreamTicket"
+  | "ReceiverStreamTicket"
+  | "WithdrawerStreamTicket";
+
+/**
+ * Record plaintexts do not carry the record name, but every stream ticket
+ * carries a `ticket_type` member (see `main.leo`): 0 = sender, 1 = receiver,
+ * 2 = withdrawer.
+ */
+const TICKET_KIND_BY_TYPE: Record<number, TicketRecordName> = {
+  0: "SenderStreamTicket",
+  1: "ReceiverStreamTicket",
+  2: "WithdrawerStreamTicket",
+};
+
+const TICKET_TYPE_BY_KIND: Record<TicketRecordName, number> = {
+  SenderStreamTicket: 0,
+  ReceiverStreamTicket: 1,
+  WithdrawerStreamTicket: 2,
+};
+
+/**
+ * Classify a decrypted record plaintext as a stream ticket by its
+ * `ticket_type` member, or `undefined` when it is not a ticket record.
+ */
+export function classifyTicket(plaintext: string): TicketRecordName | undefined {
+  const match = /ticket_type:\s*(\d+)u8/.exec(plaintext);
+  if (match === null) return undefined;
+  return TICKET_KIND_BY_TYPE[Number(match[1])];
+}
+
+/** Whether a decrypted record plaintext is the named stream ticket. */
+export function matchesTicketRecord(
+  plaintext: string,
+  recordName: TicketRecordName,
+): boolean {
+  const match = /ticket_type:\s*(\d+)u8/.exec(plaintext);
+  return match !== null && Number(match[1]) === TICKET_TYPE_BY_KIND[recordName];
+}
+
 /**
  * Parse a decrypted `SenderStreamTicket` record plaintext (ticket_type 0).
  * Throws when the plaintext is not a sender ticket.
  */
-export function parseSenderTicket(plaintext: string): SenderTicket {
+export function parseSenderTicket(plaintext: string): RawSenderTicket {
   const m = requireTicketMembers(plaintext, 0);
   return {
     owner: requireMember(m, "owner"),
@@ -308,7 +364,7 @@ export function parseSenderTicket(plaintext: string): SenderTicket {
  * Parse a decrypted `ReceiverStreamTicket` record plaintext (ticket_type 1).
  * Throws when the plaintext is not a receiver ticket.
  */
-export function parseReceiverTicket(plaintext: string): ReceiverTicket {
+export function parseReceiverTicket(plaintext: string): RawReceiverTicket {
   const m = requireTicketMembers(plaintext, 1);
   return {
     owner: requireMember(m, "owner"),
@@ -326,7 +382,7 @@ export function parseReceiverTicket(plaintext: string): ReceiverTicket {
  * Parse a decrypted `WithdrawerStreamTicket` record plaintext (ticket_type 2).
  * Throws when the plaintext is not a withdrawer ticket.
  */
-export function parseWithdrawerTicket(plaintext: string): WithdrawerTicket {
+export function parseWithdrawerTicket(plaintext: string): RawWithdrawerTicket {
   const m = requireTicketMembers(plaintext, 2);
   return {
     owner: requireMember(m, "owner"),
@@ -358,8 +414,3 @@ function requireTicketMembers(
   }
   return m;
 }
-
-
-
-
-// watch-test

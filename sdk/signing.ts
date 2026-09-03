@@ -10,16 +10,17 @@
 
 import { Address, PrivateKey, Signature } from "@provablehq/sdk";
 import { streamTokenFeeMessage } from "./hashing.js";
-import type { StreamTokenFee } from "./types.js";
+import type { RawStreamTokenFee } from "./types.js";
 
 /**
  * Sign a `StreamTokenFee` with the config admin's private key. Returns the
  * signature literal (`sign1...`) to pass as the `fee_signature` input of
- * `create_stream_private` or `create_stream_public`.
+ * `create_stream_private` or `create_stream_public`. The fee object is in
+ * raw on-chain form (`streamFeeAmount` in token micro-units).
  */
 export function signStreamTokenFee(
   privateKey: string | PrivateKey,
-  tokenFee: StreamTokenFee,
+  tokenFee: RawStreamTokenFee,
 ): string {
   const key =
     typeof privateKey === "string" ? PrivateKey.from_string(privateKey) : privateKey;
@@ -38,7 +39,7 @@ export function signStreamTokenFee(
  */
 export function verifyStreamTokenFeeSignature(
   address: string,
-  tokenFee: StreamTokenFee,
+  tokenFee: RawStreamTokenFee,
   signature: string,
 ): boolean {
   const message = streamTokenFeeMessage(tokenFee);
@@ -49,9 +50,3 @@ export function verifyStreamTokenFeeSignature(
     sig.free();
   }
 }
-
-/** @deprecated Use {@link signStreamTokenFee} instead. */
-export const signTokenPrice = signStreamTokenFee;
-
-/** @deprecated Use {@link verifyStreamTokenFeeSignature} instead. */
-export const verifyTokenPriceSignature = verifyStreamTokenFeeSignature;

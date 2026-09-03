@@ -4,7 +4,7 @@
  * SDK users can preview fees and withdrawable amounts off-chain.
  */
 
-import type { StreamAnchor } from "./types.js";
+import type { RawStreamAnchor } from "./types.js";
 
 /** @deprecated Legacy TokenPrice-era constant; the on-chain program no longer
  * uses USD price feeds. Stream fees are admin-signed via `StreamTokenFee`. */
@@ -105,7 +105,7 @@ export interface TopupAmount {
  */
 export function computeTopupAmount(
   anchor: Pick<
-    StreamAnchor,
+    RawStreamAnchor,
     | "startTime"
     | "duration"
     | "paused"

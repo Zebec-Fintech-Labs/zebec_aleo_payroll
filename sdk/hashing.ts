@@ -9,7 +9,7 @@
 
 import { BHP256, Plaintext } from "@provablehq/sdk";
 import { fieldLiteral, identLiteral, streamTokenFeeToPlaintext } from "./plaintext.js";
-import type { StreamTokenFee } from "./types.js";
+import type { RawStreamTokenFee } from "./types.js";
 
 let hasher: BHP256 | undefined;
 
@@ -97,9 +97,6 @@ export function streamRefKey(account: string, config: string | bigint, index: bi
  * `BHP256::hash_to_field(token_fee)` as computed on-chain by
  * `finalize_create_stream`. Returns the canonical field literal.
  */
-export function streamTokenFeeMessage(tokenFee: StreamTokenFee): string {
+export function streamTokenFeeMessage(tokenFee: RawStreamTokenFee): string {
   return hashPlaintextToField(streamTokenFeeToPlaintext(tokenFee));
 }
-
-/** @deprecated Use {@link streamTokenFeeMessage} instead. */
-export const tokenPriceMessage = streamTokenFeeMessage;

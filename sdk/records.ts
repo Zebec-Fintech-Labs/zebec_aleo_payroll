@@ -4,10 +4,13 @@
  * stream deposits, and stream ticket records for stream management.
  */
 
-import * as fs from "node:fs";
-import { join } from "node:path";
-
 import type { AleoNetworkClient, RecordPlaintext } from "@provablehq/sdk";
+
+import { matchesTicketRecord } from "./plaintext.js";
+import type { TicketRecordName } from "./plaintext.js";
+
+export { matchesTicketRecord } from "./plaintext.js";
+export type { TicketRecordName } from "./plaintext.js";
 
 const CREDITS_PROGRAM = "credits.aleo";
 
@@ -18,15 +21,19 @@ const CREDITS_PROGRAM = "credits.aleo";
  * re-collecting them. Note that a cached record is excluded from every
  * future scan of that program, whatever the `match` criteria — delete the
  * cache file to make those records scannable again.
+ *
+ * `node:fs` is imported lazily inside the cache helpers so this module stays
+ * importable from browser bundles (wallet mode never scans the chain).
  */
 const NONCE_CACHE_DIR = ".nonce-cache";
 
 function nonceCacheFile(programs: string[]): string {
-  return join(NONCE_CACHE_DIR, `${programs.join("+")}.json`);
+  return `${NONCE_CACHE_DIR}/${programs.join("+")}.json`;
 }
 
-function loadNonceCache(file: string): string[] {
+async function loadNonceCache(file: string): Promise<string[]> {
   try {
+    const fs = await import("node:fs");
     const parsed: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
     if (!Array.isArray(parsed)) return [];
     return parsed.filter((nonce): nonce is string => typeof nonce === "string");
@@ -35,7 +42,8 @@ function loadNonceCache(file: string): string[] {
   }
 }
 
-function saveNonceCache(file: string, nonces: string[]): void {
+async function saveNonceCache(file: string, nonces: string[]): Promise<void> {
+  const fs = await import("node:fs");
   fs.mkdirSync(NONCE_CACHE_DIR, { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify(nonces, null, 2)}\n`);
 }
@@ -147,7 +155,7 @@ async function scanForRecord(
     // Nonces of records already collected, so retried windows skip them.
     // Seeded from the per-program cache and persisted as the scan progresses.
     const cacheFile = nonceCacheFile(programs);
-    const nonces: string[] = loadNonceCache(cacheFile);
+    const nonces: string[] = await loadNonceCache(cacheFile);
     while (end > floor) {
       const start = Math.max(floor, end - SCAN_WINDOW_BLOCKS);
       const records = await networkClient.findUnspentRecords(
@@ -162,19 +170,27 @@ async function scanForRecord(
       for (const record of records) {
         nonces.push(record.nonce());
         if (match(record)) {
-          saveNonceCache(cacheFile, nonces);
+          await saveNonceCache(cacheFile, nonces);
           return record;
         }
       }
-      saveNonceCache(cacheFile, nonces);
+      await saveNonceCache(cacheFile, nonces);
       end = start;
     }
     return undefined;
   });
 }
 
-function recordAmount(record: RecordPlaintext, member: string): bigint | undefined {
-  const match = new RegExp(`${member}:\\s*(\\d+)(?:u64|u128)`).exec(record.toString());
+/**
+ * `microcredits:`/`amount:` style member extraction from a record plaintext
+ * (or anything stringifyable to one, e.g. a `RecordPlaintext`).
+ */
+export function recordAmount(
+  record: RecordPlaintext | string,
+  member: string,
+): bigint | undefined {
+  const text = typeof record === "string" ? record : record.toString();
+  const match = new RegExp(`${member}:\\s*(\\d+)(?:u64|u128)`).exec(text);
   return match ? BigInt(match[1]!) : undefined;
 }
 
@@ -238,27 +254,6 @@ export async function findTokenRecord(
   return record;
 }
 
-export type TicketRecordName =
-  | "SenderStreamTicket"
-  | "ReceiverStreamTicket"
-  | "WithdrawerStreamTicket";
-
-/**
- * Record plaintexts do not carry the record name, but every stream ticket
- * carries a `ticket_type` member (see `main.leo`): 0 = sender, 1 = receiver,
- * 2 = withdrawer.
- */
-const TICKET_TYPE_BY_NAME: Record<TicketRecordName, number> = {
-  SenderStreamTicket: 0,
-  ReceiverStreamTicket: 1,
-  WithdrawerStreamTicket: 2,
-};
-
-function matchesTicket(text: string, recordName: TicketRecordName): boolean {
-  const match = /ticket_type:\s*(\d+)u8/.exec(text);
-  return match !== null && Number(match[1]) === TICKET_TYPE_BY_NAME[recordName];
-}
-
 /**
  * Find the unspent stream ticket record of `recordName` for `streamId`
  * owned by the account behind `privateKey`. Throws if not found.
@@ -279,7 +274,7 @@ export async function findTicketRecord(
     (candidate) => {
       const text = candidate.toString();
       return (
-        matchesTicket(text, recordName) &&
+        matchesTicketRecord(text, recordName) &&
         new RegExp(`stream_id:\\s*${idDigits}field`).test(text)
       );
     },
