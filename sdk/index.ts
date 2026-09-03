@@ -4,11 +4,27 @@
 
 export {
   StreamService as StreamClient,
-  Arc22Service,
   DEFAULT_ENDPOINT,
   PROGRAM_ID,
 } from "./client.js";
-export type { Arc22ServiceOptions } from "./client.js";
+
+export {
+  Network,
+  DEFAULT_ALEO_ENDPOINT,
+  CREDITS_PROGRAM_ID,
+  ZEBEC_STREAM_PROGRAM_ID,
+  STABLE_COINS_CONFIGS,
+} from "./config.js";
+export type { StablecoinNetworkConfig } from "./config.js";
+
+export { createAleoWallet } from "./wallet.js";
+export type { AleoWalletOptions } from "./wallet.js";
+
+export {
+  toMicroUnits,
+  fromMicroUnits,
+  getDecimalsByTokenProgram,
+} from "./utils.js";
 
 export {
   createStreamParamsToPlaintext,
@@ -21,6 +37,10 @@ export {
   streamToPlaintext,
   fieldLiteral,
   identLiteral,
+  i64Literal,
+  u64Literal,
+  classifyTicket,
+  matchesTicketRecord,
   parseStructMembers,
   parseStreamAnchor,
   parseStream,
@@ -33,6 +53,7 @@ export {
   parseFieldLiteral,
   parseIdentLiteral,
 } from "./plaintext.js";
+export type { TicketRecordName } from "./plaintext.js";
 
 export {
   hashPlaintextToField,
@@ -64,31 +85,43 @@ export type { StreamFee, TopupAmount, WithdrawableAmounts } from "./math.js";
 export {
   signStreamTokenFee,
   verifyStreamTokenFeeSignature,
-  signTokenPrice,           // @deprecated
-  verifyTokenPriceSignature, // @deprecated
 } from "./signing.js";
 
 export {
   findCreditsRecord,
   findTokenRecord,
   findTicketRecord,
+  recordAmount,
 } from "./records.js";
-export type { TicketRecordName } from "./records.js";
 
 export type {
+  AleoWallet,
   Config,
   CreateStreamParams,
   ExecuteOptions,
-  ListedStream,
   MerkleProof,
-  Stream,
-  StreamClientOptions,
-  StreamConfig,
+  PrivateStreamEntry,
+  PrivateStreamOperationOptions,
+  PrivateTopupStreamOptions,
+  PublicStreamEntry,
+  RawConfig,
+  RawCreateStreamParams,
+  RawReceiverTicket,
+  RawSenderTicket,
+  RawStream,
+  RawStreamAnchor,
+  RawStreamConfig,
+  RawStreamTokenFee,
+  RawWithdrawerTicket,
   ReceiverTicket,
   SenderTicket,
+  Stream,
   StreamAnchor,
   StreamDirection,
+  StreamParams,
+  StreamServiceOptions,
   StreamTokenFee,
-  WithdrawerTicket,
-  TokenPrice, // @deprecated alias for StreamTokenFee
+  TopupStreamParams,
+  TransactionOptions,
+  TokenPrice, // @deprecated alias for RawStreamTokenFee
 } from "./types.js";
