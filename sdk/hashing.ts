@@ -73,12 +73,23 @@ export function tokenAllowanceKey(owner: string, spender: string): string {
 }
 
 /**
- * Mapping key of `outgoing_stream_refs` / `incoming_stream_refs` for
- * `(account, index)` — BHP256 hash of the
- * `StreamRefKey { account: address, index: u64 }` struct.
+ * Mapping key of `outgoing_stream_counts` / `incoming_stream_counts` for
+ * `(account, config)` — BHP256 hash of the
+ * `StreamCountKey { account: address, config: field }` struct.
  */
-export function streamRefKey(account: string, index: bigint | number): string {
-  return hashPlaintextToField(`{ account: ${account}, index: ${index}u64 }`);
+export function streamCountKey(account: string, config: string | bigint): string {
+  return hashPlaintextToField(`{ account: ${account}, config: ${fieldLiteral(config)} }`);
+}
+
+/**
+ * Mapping key of `outgoing_stream_refs` / `incoming_stream_refs` for
+ * `(account, config, index)` — BHP256 hash of the
+ * `StreamRefKey { account: address, config: field, index: u64 }` struct.
+ */
+export function streamRefKey(account: string, config: string | bigint, index: bigint | number): string {
+  return hashPlaintextToField(
+    `{ account: ${account}, config: ${fieldLiteral(config)}, index: ${index}u64 }`,
+  );
 }
 
 /**

@@ -99,7 +99,7 @@ describe("struct serializers", () => {
     });
     assert.equal(
       fee,
-      "{ config: 12345field, stream_token: 'token', stream_fee_amount: 50000u64, " +
+      "{ config: 12345field, stream_token: 'token', stream_fee_amount: 50000u128, " +
       "expiry: 1893456000i64, nonce: 5field }",
     );
     Plaintext.fromString(fee).free();
@@ -127,7 +127,7 @@ describe("struct serializers", () => {
       `{ stream_id: 42field, config: 7field, sender: ${ADMIN}, receiver: ${RECEIVER}, ` +
       `full_amount: 1000000u128, token_program: 'token', is_cancelable: true, ` +
       `is_pausable: false, auto_withdrawable: true, can_topup: true, ` +
-      `topup_count: 1u64, initialized: true }`,
+      `topup_count: 1u64 }`,
     );
     Plaintext.fromString(text).free();
   });
@@ -146,7 +146,6 @@ function sampleStream(): Stream {
     autoWithdrawable: true,
     canTopup: true,
     topupCount: 1n,
-    initialized: true,
   };
 }
 
@@ -164,7 +163,6 @@ function sampleAnchor(): StreamAnchor {
     withdrawnAmount: 500_000n,
     isPublic: false,
     createdTimestamp: 1_799_999_000n,
-    initialized: true,
   };
 }
 
@@ -192,8 +190,7 @@ describe("parsers", () => {
   fee_vault: ${RECEIVER},
   withdrawer: ${RECEIVER},
   base_fee: 1000u64,
-  platform_fee: 2000u64,
-  initialized: true
+  platform_fee: 2000u64
 }`;
     assert.deepEqual(parseStreamConfig(value), {
       admin: ADMIN,
@@ -201,7 +198,6 @@ describe("parsers", () => {
       withdrawer: RECEIVER,
       baseFee: 1000n,
       platformFee: 2000n,
-      initialized: true,
     });
   });
 
@@ -231,8 +227,7 @@ describe("parsers", () => {
       is_pausable: false,
       auto_withdrawable: true,
       can_topup: true,
-      topup_count: 1u64,
-      initialized: true
+      topup_count: 1u64
     }`;
     assert.deepEqual(parseStream(value), sampleStream());
   });

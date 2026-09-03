@@ -216,5 +216,10 @@ export function computeAutoWithdrawalFee(
 /** Daily fallback used by the on-chain program to guard division by zero. */
 export const DEFAULT_WITHDRAW_FREQUENCY = 86_400n;
 
-/** Fee burned by `credits.aleo::split` (deducted from the change record). */
+/**
+ * @deprecated Legacy constant from when `create_stream_private` split the
+ * credit record (the split burned 10,000 microcredits). The program now pays
+ * the auto-withdrawal fee with a direct `credits.aleo::transfer_private` and
+ * the stream fee in the streaming token, so no split burn applies.
+ */
 export const SPLIT_FEE = 10_000n;

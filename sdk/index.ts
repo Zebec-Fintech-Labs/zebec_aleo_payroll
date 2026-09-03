@@ -39,6 +39,7 @@ export {
   configNameToField,
   whitelistKey,
   tokenAllowanceKey,
+  streamCountKey,
   streamRefKey,
   streamTokenFeeMessage,
   tokenPriceMessage, // @deprecated
@@ -55,7 +56,7 @@ export {
   BPS_DENOMINATOR, // @deprecated
   DEFAULT_FEE_BPS, // @deprecated
   DEFAULT_WITHDRAW_FREQUENCY,
-  SPLIT_FEE,
+  SPLIT_FEE, // @deprecated
   WITHDRAW_FREQUENCIES,
 } from "./math.js";
 export type { StreamFee, TopupAmount, WithdrawableAmounts } from "./math.js";

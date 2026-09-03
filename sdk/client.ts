@@ -11,13 +11,12 @@ import {
   type RecordPlaintext,
 } from "@provablehq/sdk/testnet.js";
 
-import { streamRefKey, tokenAllowanceKey, whitelistKey } from "./hashing.js";
+import { streamCountKey, streamRefKey, tokenAllowanceKey, whitelistKey } from "./hashing.js";
 import {
   computeAutoWithdrawalFee,
   computeTopupAmount,
   computeWithdrawableAmount,
   nowSeconds,
-  SPLIT_FEE,
 } from "./math.js";
 import {
   configToPlaintext,
@@ -112,8 +111,10 @@ export class StreamService {
    * `"my_token"` — without the `.aleo` suffix). `creditRecord` / `tokenRecord`
    * are located automatically when omitted (requires a `privateKey`).
    *
-   * The credit record must cover: auto-withdrawal fee + stream fee +
-   * 10,000 microcredits (the `credits.aleo::split` protocol burn).
+   * The credit record only covers the auto-withdrawal fee (paid in ALEO to the
+   * config withdrawer). The token record must cover the stream fee plus the
+   * deposit: the program splits the fee off the token record and transfers it
+   * privately to the config's fee vault, then escrows the deposit.
    */
   async createStreamPrivate(
     params: CreateStreamParams,
@@ -142,15 +143,17 @@ export class StreamService {
     const creditRecord =
       options.creditRecord !== undefined
         ? options.creditRecord.toString()
-        : await this.findCredits(autoWithdrawalFee + streamFee + SPLIT_FEE);
+        : await this.findCredits(autoWithdrawalFee);
     console.debug(
-      `Found credit record covering auto-withdrawal fee ${autoWithdrawalFee}, stream fee ${streamFee}, split burn ${SPLIT_FEE}`,
+      `Found credit record covering auto-withdrawal fee ${autoWithdrawalFee}`,
     );
     const tokenRecord =
       options.tokenRecord !== undefined
         ? options.tokenRecord.toString()
-        : await this.findToken(`${tokenProgram}.aleo`, depositAmount);
-    console.debug(`Found token record covering deposit amount ${depositAmount}`);
+        : await this.findToken(`${tokenProgram}.aleo`, depositAmount + streamFee);
+    console.debug(
+      `Found token record covering deposit amount ${depositAmount} + stream fee ${streamFee}`,
+    );
     const tokenProgramId = `${tokenProgram}.aleo`;
     const inputs = [
       createStreamParamsToPlaintext(params),
@@ -284,8 +287,11 @@ export class StreamService {
    * Execute `create_stream_public`. Unlike the private variant, the token
    * deposit is pulled from the signer's public balance (the program calls
    * `IARC22::transfer_from_public`), so no credit/token records are needed —
-   * the employer must have approved this program on the token and hold enough
-   * public credits for the fees. `merkleProofs` is not required either.
+   * the employer must have approved this program on the token for the deposit
+   * **plus the stream fee** (the fee is also pulled in the streaming token via
+   * `IARC22::transfer_from_public` to the config's fee vault) and hold enough
+   * public credits for the auto-withdrawal fee. `merkleProofs` is not required
+   * either.
    */
   async createStreamPublic(
     params: CreateStreamParams,
@@ -605,57 +611,60 @@ export class StreamService {
   }
 
   // =======================================================================
-  // Reads (per-address public stream registries)
+  // Reads (per-address, per-config public stream registries)
   // =======================================================================
 
   /**
-   * Number of public streams ever created by `account`, from the
-   * `outgoing_stream_counts` mapping. Returns `0n` when unset.
+   * Number of public streams ever created by `account` under `config`, from
+   * the `outgoing_stream_counts` mapping (keyed by
+   * `BHP256(StreamCountKey { account, config })`). Returns `0n` when unset.
    */
-  async getOutgoingStreamCount(account: string): Promise<bigint> {
-    return this.getRegistryCount("outgoing_stream_counts", account);
+  async getOutgoingStreamCount(account: string, config: string | bigint): Promise<bigint> {
+    return this.getRegistryCount("outgoing_stream_counts", account, config);
   }
 
   /**
-   * Number of public streams ever received by `account`, from the
-   * `incoming_stream_counts` mapping. Returns `0n` when unset.
+   * Number of public streams ever received by `account` under `config`, from
+   * the `incoming_stream_counts` mapping. Returns `0n` when unset.
    */
-  async getIncomingStreamCount(account: string): Promise<bigint> {
-    return this.getRegistryCount("incoming_stream_counts", account);
+  async getIncomingStreamCount(account: string, config: string | bigint): Promise<bigint> {
+    return this.getRegistryCount("incoming_stream_counts", account, config);
   }
 
   /**
-   * The stream id at slot `index` of `account`'s outgoing registry
-   * (`outgoing_stream_refs`), or `undefined` when the slot is absent.
+   * The stream id at slot `index` of `account`'s outgoing registry under
+   * `config` (`outgoing_stream_refs`), or `undefined` when the slot is absent.
    */
   async getOutgoingStreamRef(
     account: string,
+    config: string | bigint,
     index: bigint | number,
   ): Promise<string | undefined> {
-    return this.getRegistryRef("outgoing_stream_refs", account, index);
+    return this.getRegistryRef("outgoing_stream_refs", account, config, index);
   }
 
   /**
-   * The stream id at slot `index` of `account`'s incoming registry
-   * (`incoming_stream_refs`), or `undefined` when the slot is absent.
+   * The stream id at slot `index` of `account`'s incoming registry under
+   * `config` (`incoming_stream_refs`), or `undefined` when the slot is absent.
    */
   async getIncomingStreamRef(
     account: string,
+    config: string | bigint,
     index: bigint | number,
   ): Promise<string | undefined> {
-    return this.getRegistryRef("incoming_stream_refs", account, index);
+    return this.getRegistryRef("incoming_stream_refs", account, config, index);
   }
 
   /**
-   * List all public stream ids ever created by `account` (outgoing registry,
-   * in creation order). Includes canceled and ended streams — filter via
-   * {@link StreamService.getStreamAnchor}.
+   * List all public stream ids ever created by `account` under `config`
+   * (outgoing registry, in creation order). Includes canceled and ended
+   * streams — filter via {@link StreamService.getStreamAnchor}.
    */
-  async listOutgoingStreamIds(account: string): Promise<string[]> {
-    const count = await this.getOutgoingStreamCount(account);
+  async listOutgoingStreamIds(account: string, config: string | bigint): Promise<string[]> {
+    const count = await this.getOutgoingStreamCount(account, config);
     const ids: string[] = [];
     for (let i = 0n; i < count; i++) {
-      const ref = await this.getOutgoingStreamRef(account, i);
+      const ref = await this.getOutgoingStreamRef(account, config, i);
       if (ref === undefined) {
         throw new Error(`missing outgoing stream ref for ${account} at index ${i}`);
       }
@@ -665,14 +674,15 @@ export class StreamService {
   }
 
   /**
-   * List all public stream ids ever received by `account` (incoming registry,
-   * in creation order). Includes canceled and ended streams.
+   * List all public stream ids ever received by `account` under `config`
+   * (incoming registry, in creation order). Includes canceled and ended
+   * streams.
    */
-  async listIncomingStreamIds(account: string): Promise<string[]> {
-    const count = await this.getIncomingStreamCount(account);
+  async listIncomingStreamIds(account: string, config: string | bigint): Promise<string[]> {
+    const count = await this.getIncomingStreamCount(account, config);
     const ids: string[] = [];
     for (let i = 0n; i < count; i++) {
-      const ref = await this.getIncomingStreamRef(account, i);
+      const ref = await this.getIncomingStreamRef(account, config, i);
       if (ref === undefined) {
         throw new Error(`missing incoming stream ref for ${account} at index ${i}`);
       }
@@ -682,16 +692,17 @@ export class StreamService {
   }
 
   /**
-   * List every public stream touching `account` in both directions, hydrated
-   * with its anchor and (public) stream entry. A stream where `account` is
-   * both sender and receiver appears once with `direction: "both"`. Canceled
-   * and ended streams are included; use `anchor.canceled` /
-   * `anchor.withdrawnAmount >= stream.fullAmount` to filter.
+   * List every public stream touching `account` under `config` in both
+   * directions, hydrated with its anchor and (public) stream entry. A stream
+   * where `account` is both sender and receiver appears once with
+   * `direction: "both"`. Canceled and ended streams are included; use
+   * `anchor.canceled` / `anchor.withdrawnAmount >= stream.fullAmount` to
+   * filter.
    */
-  async listPublicStreams(account: string): Promise<ListedStream[]> {
+  async listPublicStreams(account: string, config: string | bigint): Promise<ListedStream[]> {
     const [outIds, inIds] = await Promise.all([
-      this.listOutgoingStreamIds(account),
-      this.listIncomingStreamIds(account),
+      this.listOutgoingStreamIds(account, config),
+      this.listIncomingStreamIds(account, config),
     ]);
     const byId = new Map<string, ListedStream>();
     for (const id of outIds) {
@@ -715,12 +726,16 @@ export class StreamService {
     return entries;
   }
 
-  private async getRegistryCount(mappingName: string, account: string): Promise<bigint> {
+  private async getRegistryCount(
+    mappingName: string,
+    account: string,
+    config: string | bigint,
+  ): Promise<bigint> {
     try {
       const raw = await this.networkClient.getProgramMappingValue(
         this.programId,
         mappingName,
-        account,
+        streamCountKey(account, config),
       );
       if (!raw) return 0n;
       return parseIntLiteral(raw);
@@ -732,13 +747,14 @@ export class StreamService {
   private async getRegistryRef(
     mappingName: string,
     account: string,
+    config: string | bigint,
     index: bigint | number,
   ): Promise<string | undefined> {
     try {
       const raw = await this.networkClient.getProgramMappingValue(
         this.programId,
         mappingName,
-        streamRefKey(account, index),
+        streamRefKey(account, config, index),
       );
       if (!raw) return undefined;
       return parseFieldLiteral(raw);

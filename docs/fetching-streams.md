@@ -20,21 +20,28 @@ state lives in encrypted records owned by the participants.
 | `streams` | `stream_id: field` | `Stream` | `create_stream_public`, `topup_stream_public` only |
 | `stream_configs` | `config: field` | `StreamConfig` | admin |
 | `whitelisted_token_programs` | `BHP256(WhitelistKey)` | `bool` | admin |
-| `outgoing_stream_counts` | `account: address` | `u64` | `create_stream_public` only |
-| `incoming_stream_counts` | `account: address` | `u64` | `create_stream_public` only |
+| `outgoing_stream_counts` | `BHP256(StreamCountKey)` | `u64` | `create_stream_public` only |
+| `incoming_stream_counts` | `BHP256(StreamCountKey)` | `u64` | `create_stream_public` only |
 | `outgoing_stream_refs` | `BHP256(StreamRefKey)` | `stream_id: field` | `create_stream_public` only |
 | `incoming_stream_refs` | `BHP256(StreamRefKey)` | `stream_id: field` | `create_stream_public` only |
 
-`StreamRefKey` (the per-address registry slot key):
+`StreamCountKey` (the per-address, per-config count key):
 
 ```
-account: address, index: u64
+account: address, config: field
+```
+
+`StreamRefKey` (the per-address, per-config registry slot key):
+
+```
+account: address, config: field, index: u64
 ```
 
 The two `*_stream_counts` mappings track how many public streams an address has
-ever created (sender) or received (receiver). For each, the corresponding
-`*_stream_refs` mapping is keyed by `BHP256(StreamRefKey { account, index })`
-and holds the `stream_id` at that slot — an **append-only** list. Canceled or
+ever created (sender) or received (receiver) **under a given config**. For
+each, the corresponding `*_stream_refs` mapping is keyed by
+`BHP256(StreamRefKey { account, config, index })` and holds the `stream_id` at
+that slot — an **append-only** list. Canceled or
 ended streams are *not* removed; filter them client-side via the anchor (§5).
 Self-streams (sender == receiver) appear in both registries.
 
@@ -48,8 +55,7 @@ Self-streams (sender == receiver) appear in both registries.
 stream_id: field, start_time: i64, duration: u64,
 paused: bool, canceled: bool, canceled_at: i64,
 deposited_amount: u128, last_paused_time: i64, paused_interval: u64,
-withdrawn_amount: u128, is_public: bool, created_timestamp: i64,
-initialized: bool
+withdrawn_amount: u128, is_public: bool, created_timestamp: i64
 ```
 
 `Stream` (public streams only):
@@ -58,7 +64,7 @@ initialized: bool
 stream_id: field, config: field, sender: address, receiver: address,
 full_amount: u128, token_program: identifier,
 is_cancelable: bool, is_pausable: bool, auto_withdrawable: bool,
-can_topup: bool, topup_count: u64, initialized: bool
+can_topup: bool, topup_count: u64
 ```
 
 **Key point:** even for *private* streams the `stream_anchors` entry exists and
@@ -185,21 +191,25 @@ be discovered only through wallet-held ticket records (§4.2).
 
 ### 4.1 Public streams — the on-chain registries
 
-For a given `account`, read the count then each ref slot:
+For a given `account` and `config`, read the count then each ref slot:
 
 ```ts
-import { streamRefKey } from "../sdk/index.js";
+import { streamCountKey, streamRefKey } from "../sdk/index.js";
 
-async function listPublicStreamIds(client, PROGRAM, account, direction) {
+async function listPublicStreamIds(client, PROGRAM, account, config, direction) {
   const count = BigInt(
-    await client.getProgramMappingValue(PROGRAM, `${direction}_stream_counts`, account),
+    await client.getProgramMappingValue(
+      PROGRAM,
+      `${direction}_stream_counts`,
+      streamCountKey(account, config), // BHP256 hash of StreamCountKey{account,config}
+    ),
   );
   const ids = [];
   for (let i = 0n; i < count; i++) {
     const ref = await client.getProgramMappingValue(
       PROGRAM,
       `${direction}_stream_refs`,
-      streamRefKey(account, i), // BHP256 hash of StreamRefKey{account,index}
+      streamRefKey(account, config, i), // BHP256 hash of StreamRefKey{account,config,index}
     );
     ids.push(ref); // "0field" only if the slot is unset (shouldn't happen)
   }
@@ -207,19 +217,20 @@ async function listPublicStreamIds(client, PROGRAM, account, direction) {
 }
 ```
 
-`streamRefKey(account, index)` reproduces the on-chain `BHP256::hash_to_field`
-key; its derivation is covered by SDK parity tests. Hydrate each id with
+`streamCountKey(account, config)` / `streamRefKey(account, config, index)`
+reproduce the on-chain `BHP256::hash_to_field` keys; their derivation is
+covered by SDK parity tests. Hydrate each id with
 `getStreamAnchor` / `getStream` (§2). `WalletStreamService.listMyPublicStreams()`
-and `StreamClient.listPublicStreams(account)` already do this and merge the
+and `StreamClient.listPublicStreams(account, config)` already do this and merge the
 two directions into one list with `direction: outgoing | incoming | both`.
 
 Sample the new view functions directly:
 
 ```
-view fn get_outgoing_stream_count(account) -> u64
-view fn get_incoming_stream_count(account) -> u64
-view fn get_outgoing_stream_ref(account, index) -> field   // 0field if unset
-view fn get_incoming_stream_ref(account, index) -> field
+view fn get_outgoing_stream_count(account, config) -> u64
+view fn get_incoming_stream_count(account, config) -> u64
+view fn get_outgoing_stream_ref(account, config, index) -> field   // 0field if unset
+view fn get_incoming_stream_ref(account, config, index) -> field
 ```
 
 Notes:
@@ -279,8 +290,9 @@ Rules that will bite you if ignored:
 
 - **Struct member order is consensus-critical.** Mapping values and signed
   structs are hashed as bits in Leo declaration order
-  (`BHP256::hash_to_field`). This includes `StreamRefKey` (the registry key),
-  whose `account, index` order must match the SDK's `streamRefKey()` — covered
+  (`BHP256::hash_to_field`). This includes `StreamCountKey` / `StreamRefKey`
+  (the registry keys), whose `account, config` / `account, config, index`
+  order must match the SDK's `streamCountKey()` / `streamRefKey()` — covered
   by parity tests under `sdk-tests/unit/hashing.test.ts`. Never reorder fields
   in `sdk/plaintext.ts` emitters/parsers without regenerating vectors.
 - **Private lifecycle fns take caller-supplied anchor snapshots** asserted

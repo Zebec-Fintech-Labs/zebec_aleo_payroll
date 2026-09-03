@@ -188,11 +188,12 @@ Costs: storage (tx bytes), finalize (mapping ops), proof synthesis (per tx). Min
   (0 = sender, 1 = receiver, 2 = withdrawer; ported `matchesTicket` logic).
 - The only private key in the app is the admin attestation key input on the
   Employer page, used solely for `signStreamTokenFee` (never persisted).
-- **Current status (in sync):** the app uses the `StreamTokenFee` struct
-  (`config`, `stream_token`, `stream_fee_amount`, `expiry`, `nonce`) with
-  8 / 5 inputs on the create entries, matching the on-chain program. Anchor
-  serialization no longer carries `covered_until`; top-up debt math mirrors
-  the vested-vs-deposited model (`computeTopupAmount` in `sdk/math.ts`).
+- **Current status (needs update):** the app predates the per-config stream
+  registry (`StreamRefKey`/`StreamCountKey` with a `config` member) and the
+  token-denominated `stream_fee_amount` (u128, paid in the streaming token;
+  no `credits.aleo::split` burn) program changes. It still calls
+  `streamRefKey(account, index)` and sizes records with the legacy
+  `SPLIT_FEE` model — update `WalletStreamService.ts` before relying on it.
 <!-- END: Browser app -->
 
 <!-- BEGIN: Program architecture notes -->
@@ -235,12 +236,40 @@ before any sub-calls. This helper enforces:
 ### Signed fee struct: `StreamTokenFee`
 
 The admin signs a `StreamTokenFee { config, stream_token, stream_fee_amount:
-u64, expiry: i64, nonce: field }` struct. The on-chain program verifies the
+u128, expiry: i64, nonce: field }` struct. The on-chain program verifies the
 Schnorr signature against `BHP256::hash_to_field(token_fee)` inside
 `finalize_create_stream`. The SDK mirrors this via `streamTokenFeeToPlaintext`
 (member order must match the Leo struct declaration exactly) and
 `signStreamTokenFee` / `streamTokenFeeMessage`. **Do not add, remove, or
 reorder fields without updating the SDK and regenerating test vectors.**
+
+### Fee collection (stream fee is token-denominated)
+
+The `stream_fee_amount` is denominated in the **streaming token** (u128), not
+in ALEO microcredits:
+
+- `create_stream_private` splits the fee off the token input record
+  (`IARC22::split`) and pays it to the config's `fee_vault` via
+  `IARC22::transfer_private`; the remainder of the record funds the deposit
+  (`transfer_private_to_public` to the program). The token record must
+  therefore cover `stream_fee_amount + deposit_amount`. The credit record
+  only covers the auto-withdrawal fee, paid with a direct
+  `credits.aleo::transfer_private` to the config's `withdrawer` — there is no
+  `credits.aleo::split` and no split burn anymore.
+- `create_stream_public` pulls the fee with
+  `IARC22::transfer_from_public(caller → fee_vault)`, so the employer's
+  `approve_public` allowance must cover `deposit_amount + stream_fee_amount`.
+
+### Per-config public stream registry
+
+Public streams are indexed per sender/receiver **per config**:
+`outgoing_stream_counts` / `incoming_stream_counts` are keyed by
+`BHP256(StreamCountKey { account, config })`, and
+`outgoing_stream_refs` / `incoming_stream_refs` by
+`BHP256(StreamRefKey { account, config, index })`. Off-chain readers must
+reproduce these keys exactly — the SDK does so via `streamCountKey` /
+`streamRefKey` in `sdk/hashing.ts` (member order is consensus-critical,
+covered by `sdk-tests/unit/hashing.test.ts` vectors).
 
 ### Token payout pattern (caller-based, no allowance)
 
@@ -257,27 +286,18 @@ key as `BHP256(TokenAllowance{ account: owner, spender: self.caller })` and
 hard-`get`s it; a self-allowance is never approved, so finalize aborts with
 "…field not found in mapping allowances" at the token transition.
 
-`transfer_from_public(signer → self_address)` remains correct exactly once:
-the **deposit pull** in `create_stream_public`, where the employer has
-pre-approved the program via `approve_public`.
+`transfer_from_public(signer → …)` is correct exactly in
+`create_stream_public`, where the employer has pre-approved the program via
+`approve_public`: once for the **fee pull** (signer → `fee_vault`) and once
+for the **deposit pull** (signer → `self_address`).
 
 Private-path payouts must **re-emit** the returned `(ComplianceRecord, Token)`
 records as transition outputs (same pattern as `create_stream_private`
-forwarding `deposit_comp`/`deposit_change`) so the payout reaches the
-receiver/sender and the investigator. The same rule applies to
-`topup_stream_private`, which re-emits the sender's token **change** record
-and the compliance record — dropping the change would destroy sender value
-whenever the input record exceeds the top-up amount. The only intentional
-drop in the program is `auto_change` in `create_stream_private`, a provably
-0-value credits remainder.
-
-### `credits.aleo::split` burn
-
-`credits.aleo::split` deducts a fixed 10,000 microcredit fee from the second
-output record. `create_stream_private` includes this in its coverage assertion
-via the `SPLIT_FEE` constant. When computing the minimum required credit-record
-balance off-chain, always add `SPLIT_FEE = 10_000n` to
-`autoWithdrawalFee + streamFeeAmount`.
+forwarding the compliance/change records of its fee and deposit transfers) so
+the payout reaches the receiver/sender and the investigator. The same rule
+applies to `topup_stream_private`, which re-emits the sender's token
+**change** record and the compliance record — dropping the change would
+destroy sender value whenever the input record exceeds the top-up amount.
 
 ### Div-by-zero guard (`DEFAULT_WITHDRAW_FREQUENCY`)
 

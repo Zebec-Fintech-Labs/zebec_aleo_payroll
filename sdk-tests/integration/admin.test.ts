@@ -83,7 +83,6 @@ describe("testnet integration: admin lifecycle", function () {
     assert.equal(config.withdrawer, admin);
     assert.equal(config.baseFee, 1_000n);
     assert.equal(config.platformFee, 2_000n);
-    assert.equal(config.initialized, true);
   });
 
   it("whitelists and de-whitelists a token", async () => {

@@ -48,7 +48,7 @@ export function streamToPlaintext(p: Stream): string {
     `full_amount: ${p.fullAmount}u128, token_program: ${identLiteral(p.tokenProgram)}, ` +
     `is_cancelable: ${boolLiteral(p.isCancelable)}, is_pausable: ${boolLiteral(p.isPausable)}, ` +
     `auto_withdrawable: ${boolLiteral(p.autoWithdrawable)}, can_topup: ${boolLiteral(p.canTopup)}, ` +
-    `topup_count: ${p.topupCount}u64, initialized: ${boolLiteral(p.initialized)} }`
+    `topup_count: ${p.topupCount}u64 }`
   );
 }
 
@@ -98,13 +98,13 @@ export function configToPlaintext(c: Config): string {
  *
  * Leo struct declaration order:
  *   config: field, stream_token: identifier,
- *   stream_fee_amount: u64, expiry: i64, nonce: field
+ *   stream_fee_amount: u128, expiry: i64, nonce: field
  */
 export function streamTokenFeeToPlaintext(tf: StreamTokenFee): string {
   return validated(
     `{ config: ${fieldLiteral(tf.config)}, ` +
     `stream_token: ${identLiteral(tf.streamToken)}, ` +
-    `stream_fee_amount: ${tf.streamFeeAmount}u64, ` +
+    `stream_fee_amount: ${tf.streamFeeAmount}u128, ` +
     `expiry: ${tf.expiry}i64, nonce: ${fieldLiteral(tf.nonce)} }`
   );
 }
@@ -123,8 +123,7 @@ export function streamAnchorToPlaintext(a: StreamAnchor): string {
     `paused_interval: ${a.pausedInterval}u64, ` +
     `withdrawn_amount: ${a.withdrawnAmount}u128, ` +
     `is_public: ${boolLiteral(a.isPublic)}, ` +
-    `created_timestamp: ${a.createdTimestamp}i64, ` +
-    `initialized: ${boolLiteral(a.initialized)} }`
+    `created_timestamp: ${a.createdTimestamp}i64 }`
   );
 }
 
@@ -240,7 +239,6 @@ export function parseStream(plaintext: string): Stream {
     autoWithdrawable: parseBoolLiteral(requireMember(m, "auto_withdrawable")),
     canTopup: parseBoolLiteral(requireMember(m, "can_topup")),
     topupCount: parseIntLiteral(requireMember(m, "topup_count")),
-    initialized: parseBoolLiteral(requireMember(m, "initialized")),
   };
 }
 
@@ -263,7 +261,6 @@ export function parseStreamAnchor(plaintext: string): StreamAnchor {
     withdrawnAmount: parseIntLiteral(requireMember(m, "withdrawn_amount")),
     isPublic: parseBoolLiteral(requireMember(m, "is_public")),
     createdTimestamp: parseIntLiteral(requireMember(m, "created_timestamp")),
-    initialized: parseBoolLiteral(requireMember(m, "initialized")),
   };
 }
 
@@ -279,7 +276,6 @@ export function parseStreamConfig(plaintext: string): StreamConfig {
     withdrawer: requireMember(m, "withdrawer"),
     baseFee: parseIntLiteral(requireMember(m, "base_fee")),
     platformFee: parseIntLiteral(requireMember(m, "platform_fee")),
-    initialized: parseBoolLiteral(requireMember(m, "initialized")),
   };
 }
 

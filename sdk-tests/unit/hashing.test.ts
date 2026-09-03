@@ -3,29 +3,30 @@ import { describe, it } from "mocha";
 
 import {
   configNameToField,
+  streamCountKey,
   streamRefKey,
   streamTokenFeeMessage,
   whitelistKey,
 } from "../../sdk/hashing.js";
 
-// Known vectors produced on-chain with `leo run` (Leo 4.4.1, testnet) against
+// Known vector produced on-chain with `leo run` (Leo 4.4.1, testnet) against
 // the StreamTokenFee struct:
-//   { config: 12345field, stream_token: 'token', stream_fee_amount: 50000u64,
+//   { config: 12345field, stream_token: 'token', stream_fee_amount: 50000u128,
 //     expiry: 1893456000i64, nonce: 5field }
-// If these match, the off-chain BHP256 hashing reproduces
+// If this matches, the off-chain BHP256 hashing reproduces
 // `BHP256::hash_to_field` for StreamTokenFee exactly.
 //
-// To regenerate: hash the plaintext
-//   { config: 12345field, stream_token: 'token', stream_fee_amount: 50000u64,
-//     expiry: 1893456000i64, nonce: 5field }
-// with BHP256::hash_to_field on-chain and record the resulting field.
+// To regenerate: hash the plaintext above with BHP256::hash_to_field on-chain
+// and record the resulting field.
 //
 // Whitelist key vector is unchanged (WhitelistKey struct unchanged).
 const WHITELIST_KEY =
   "5949549857295180779432337181339499322185250953286779710073517871832327878616field";
+const STREAM_TOKEN_FEE_MESSAGE =
+  "1406243592912000924737549262953687874236215765749277301427381915962454187152field";
 
 describe("hashing — StreamTokenFee (known on-chain vector)", () => {
-  it("streamTokenFeeMessage produces a canonical field literal", () => {
+  it("streamTokenFeeMessage reproduces the on-chain fee message", () => {
     const message = streamTokenFeeMessage({
       config: 12345n,
       streamToken: "token",
@@ -33,8 +34,7 @@ describe("hashing — StreamTokenFee (known on-chain vector)", () => {
       expiry: 1_893_456_000n,
       nonce: 5n,
     });
-    // Verify the result is a valid field literal.
-    assert.match(message, /^\d+field$/);
+    assert.equal(message, STREAM_TOKEN_FEE_MESSAGE);
     // Verify determinism.
     assert.equal(
       message,
@@ -92,28 +92,32 @@ describe("configNameToField", () => {
 });
 
 // Known vectors produced with `leo run` against a scratch program computing
-// `BHP256::hash_to_field(StreamRefKey { account, index })` (Leo 4.4.1).
+// `BHP256::hash_to_field(StreamRefKey { account, config, index })` and
+// `BHP256::hash_to_field(StreamCountKey { account, config })` (Leo 4.4.1).
 const REF_KEY_ADDRESS =
   "aleo12czxn500cyj9a7lweuft6r4rrckthfck5k8440qh7atgrnt5kupqsfh038";
+const REF_KEY_CONFIG = 12345n;
 const REF_KEY_VECTORS: [bigint, string][] = [
   [
     0n,
-    "6952482170506173380307286405035580171476052413684863500439649736209321408776field",
+    "6020195188621236084074400941031386350611068300278742228244089924752997965268field",
   ],
   [
     1n,
-    "827741355657143112373889307632514086180020658795105758901897300037779376808field",
+    "6561316225218808297871897282156571022119172125950759523595370864740352486132field",
   ],
   [
     2n,
-    "4979863279181455851194491847508194138868336570890026078327554019653612308577field",
+    "3736302156749057264992416909993913953306681731787592185930978272894613483000field",
   ],
 ];
+const COUNT_KEY_VECTOR =
+  "8442124999102044995407373519281975725322734095700296910850922699010126814628field";
 
 describe("hashing — StreamRefKey (known on-chain vectors)", () => {
   it("streamRefKey reproduces the on-chain registry keys", () => {
     for (const [index, expected] of REF_KEY_VECTORS) {
-      assert.equal(streamRefKey(REF_KEY_ADDRESS, index), expected);
+      assert.equal(streamRefKey(REF_KEY_ADDRESS, REF_KEY_CONFIG, index), expected);
     }
   });
 
@@ -121,5 +125,18 @@ describe("hashing — StreamRefKey (known on-chain vectors)", () => {
     const [, a] = REF_KEY_VECTORS[0]!;
     const [, b] = REF_KEY_VECTORS[1]!;
     assert.notEqual(a, b);
+  });
+});
+
+describe("hashing — StreamCountKey (known on-chain vector)", () => {
+  it("streamCountKey reproduces the on-chain count key", () => {
+    assert.equal(streamCountKey(REF_KEY_ADDRESS, REF_KEY_CONFIG), COUNT_KEY_VECTOR);
+  });
+
+  it("different configs produce different keys", () => {
+    assert.notEqual(
+      streamCountKey(REF_KEY_ADDRESS, REF_KEY_CONFIG),
+      streamCountKey(REF_KEY_ADDRESS, 54321n),
+    );
   });
 });

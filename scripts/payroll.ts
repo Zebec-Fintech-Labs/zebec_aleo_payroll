@@ -1,20 +1,22 @@
 /**
  * Stream stream lifecycle script: create -> pause -> resume -> withdraw ->
- * cancel, against the `test_zebec_stream_v1.aleo` program on testnet.
+ * cancel, against the `test_zebec_stream_v3.aleo` program on testnet.
  *
  * Prerequisites:
  * - Config `Stream_Config_001` initialized (run `npm run admin` first) and
  *   `test_usdcx_stablecoin` whitelisted.
- * - The employer account (`PRIVATE_KEY`) must hold unspent
- *   `test_usdcx_stablecoin.aleo` Token records covering the stream deposit and
- *   credits.aleo records covering fees.
+ * - The employer account (`SENDER_PRIVATE_KEY`) must hold unspent
+ *   `test_usdcx_stablecoin.aleo` Token records covering the stream deposit
+ *   plus the (token-denominated) stream fee, and a credits.aleo record
+ *   covering the auto-withdrawal fee when auto-withdraw is enabled.
  * - The employee account (`RECEIVER_PRIVATE_KEY`) needs a small public credits
  *   balance for the withdraw priority fee. It must differ from the employer
  *   (the contract asserts `receiver != signer`).
  *
  * Environment variables:
- * - PRIVATE_KEY (required): employer/sender; also the config admin, so it
- *   signs the token price attestation.
+ * - ADMIN_PRIVATE_KEY (required): config admin; signs the stream fee
+ *   attestation (`StreamTokenFee`).
+ * - SENDER_PRIVATE_KEY (required): employer/sender.
  * - RECEIVER_PRIVATE_KEY (required): employee who withdraws.
  */
 
@@ -27,6 +29,7 @@ import { randomBytes } from "node:crypto";
 import { setTimeout } from "node:timers/promises";
 import {
     Arc22Service,
+    BPS_DENOMINATOR,
     computeStreamFee,
     configNameToField,
     DEFAULT_FEE_BPS,
@@ -158,13 +161,15 @@ async function getConfigInput(): Promise<Config> {
 }
 
 /**
- * Compute the stream fee in microcredits from off-chain USD prices and the
- * flat DEFAULT_FEE_BPS tier. The resulting amount is embedded in the signed
- * `StreamTokenFee` and verified on-chain via Schnorr signature.
+ * Compute the stream fee in stream-token units from the off-chain USD value
+ * of the stream and the flat DEFAULT_FEE_BPS tier. The resulting amount is
+ * embedded in the signed `StreamTokenFee` (a u128, denominated in the
+ * streaming token) and verified on-chain via Schnorr signature.
  */
 function computeSignedFeeAmount(streamAmount: bigint): bigint {
-    const { streamFee } = computeStreamFee(streamAmount, TOKEN_PRICE_USD, ALEO_PRICE_USD, DEFAULT_FEE_BPS);
-    return streamFee;
+    const { usdValue } = computeStreamFee(streamAmount, TOKEN_PRICE_USD, ALEO_PRICE_USD, DEFAULT_FEE_BPS);
+    // feeUsd (6 decimals) converted into token units at the token's USD price.
+    return (usdValue * DEFAULT_FEE_BPS * 1_000_000n) / (BPS_DENOMINATOR * TOKEN_PRICE_USD);
 }
 
 /** Build a fresh admin-signed `StreamTokenFee` attestation. */
@@ -204,7 +209,7 @@ async function createStreamPrivate(): Promise<string | bigint> {
     console.log("streamId:", params.streamId);
     const config = await getConfigInput();
     const { tokenFee, signature } = createSignedTokenFee(params.amount);
-    console.log(`Stream fee: ${tokenFee.streamFeeAmount} microcredits`);
+    console.log(`Stream fee: ${tokenFee.streamFeeAmount} token units`);
     const proofs = await getComplianceProofs(sender);
 
     const txId = await senderClient.createStreamPrivate(
@@ -233,11 +238,13 @@ async function createStreamPublic(): Promise<string | bigint> {
     console.log("streamId:", params.streamId);
     const config = await getConfigInput();
     const { tokenFee, signature } = createSignedTokenFee(params.amount);
-    console.log(`Public stream fee: ${tokenFee.streamFeeAmount} microcredits`);
-    // `create_stream_public` pulls the deposit via `transfer_from_public`,
-    // which requires this stream program to be approved as the spender first.
+    console.log(`Public stream fee: ${tokenFee.streamFeeAmount} token units`);
+    // `create_stream_public` pulls both the deposit and the (token-denominated)
+    // stream fee via `IARC22::transfer_from_public`, which requires this stream
+    // program to be approved as the spender for the combined amount first.
     // Check the on-chain allowance and approve if it is too low.
     const depositAmount = params.canTopup ? params.initialBufferAmount : params.amount;
+    const requiredAllowance = depositAmount + tokenFee.streamFeeAmount;
     const programAddress = Address.fromProgramId(PROGRAM_ID).toString();
     const tokenService = new Arc22Service({
         tokenProgram: TOKEN_PROGRAM,
@@ -248,17 +255,18 @@ async function createStreamPublic(): Promise<string | bigint> {
         proverConsumerId: PROVER_CONSUMER_ID,
     });
     const allowance = await tokenService.getAllowance(sender, programAddress);
-    if (allowance < depositAmount) {
+    if (allowance < requiredAllowance) {
         console.log(
-            `Allowance ${allowance} < deposit ${depositAmount}; approving ${PROGRAM_ID} for ${depositAmount}...`,
+            `Allowance ${allowance} < deposit + fee ${requiredAllowance}; approving ${PROGRAM_ID} for ${requiredAllowance}...`,
         );
-        const approveTxId = await tokenService.approve(programAddress, depositAmount, { priorityFee: 0.1 });
+        const approveTxId = await tokenService.approve(programAddress, requiredAllowance, { priorityFee: 0.1 });
         await waitForConfirmation(approveTxId);
         console.log("Approved stream program to spend tokens:", approveTxId);
     } else {
-        console.log(`Allowance ${allowance} already covers deposit ${depositAmount}; no approval needed.`);
+        console.log(`Allowance ${allowance} already covers deposit + fee ${requiredAllowance}; no approval needed.`);
     }
-    // The employer must hold enough public credits for the fees. No records/proofs needed.
+    // The employer must hold enough public credits for the auto-withdrawal fee
+    // (0 when auto-withdraw is disabled). No records/proofs needed.
     const txId = await senderClient.createStreamPublic(
         params,
         TOKEN_PROGRAM,

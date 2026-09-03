@@ -26,7 +26,6 @@ export interface Stream {
   autoWithdrawable: boolean;
   canTopup: boolean;
   topupCount: bigint;
-  initialized: boolean;
 }
 
 /** Leo `StreamConfig` struct, as stored in the `stream_config` mapping. */
@@ -36,7 +35,6 @@ export interface StreamConfig {
   withdrawer: string;
   baseFee: bigint;
   platformFee: bigint;
-  initialized: boolean;
 }
 
 /** Leo `StreamAnchor` struct, as stored in the `stream_anchors` mapping. */
@@ -53,7 +51,6 @@ export interface StreamAnchor {
   withdrawnAmount: bigint;
   isPublic: boolean;
   createdTimestamp: bigint;
-  initialized: boolean;
 }
 
 /** Leo `CreateStreamParams` struct (input of `create_stream_private`). */
@@ -93,7 +90,7 @@ export interface StreamTokenFee {
   config: string | bigint;
   /** Identifier of the stream token program. */
   streamToken: string;
-  /** Admin-signed stream fee amount in microcredits. */
+  /** Admin-signed stream fee amount in stream-token units (Leo `u128`). */
   streamFeeAmount: bigint;
   /** Unix timestamp after which this signed fee expires. */
   expiry: bigint;
