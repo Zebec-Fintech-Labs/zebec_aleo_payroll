@@ -3,13 +3,13 @@ import { Account } from "@provablehq/sdk";
 import { describe, it } from "mocha";
 
 import { signStreamTokenFee, verifyStreamTokenFeeSignature } from "../../sdk/signing.js";
-import type { StreamTokenFee } from "../../sdk/types.js";
+import type { RawStreamTokenFee } from "../../sdk/types.js";
 
 // Well-known Leo CLI default private key (public, used for tests only).
 const TEST_PRIVATE_KEY =
   "APrivateKey1zkp8CZNn3yeCseEtxuVPbDCwSyhGW6yZKUYKfgXmcpoGPWH";
 
-const tokenFee: StreamTokenFee = {
+const tokenFee: RawStreamTokenFee = {
   config: 12345n,
   streamToken: "token",
   streamFeeAmount: 50_000n,

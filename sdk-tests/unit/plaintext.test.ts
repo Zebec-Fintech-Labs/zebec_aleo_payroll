@@ -24,7 +24,7 @@ import {
   streamAnchorToPlaintext,
   streamTokenFeeToPlaintext,
 } from "../../sdk/plaintext.js";
-import type { Stream, StreamAnchor } from "../../sdk/types.js";
+import type { RawStream, RawStreamAnchor } from "../../sdk/types.js";
 
 const RECEIVER = "aleo1ezamst4pjgj9zfxqq0fwfj8a4cjuqndmasgata3hggzqygggnyfq6kmyd4";
 const ADMIN = "aleo129nrpl0dxh4evdsan3f4lyhz5pdgp6klrn5atp37ejlavswx5czsk0j5dj";
@@ -133,7 +133,7 @@ describe("struct serializers", () => {
   });
 });
 
-function sampleStream(): Stream {
+function sampleStream(): RawStream {
   return {
     streamId: "42field",
     config: "7field",
@@ -149,7 +149,7 @@ function sampleStream(): Stream {
   };
 }
 
-function sampleAnchor(): StreamAnchor {
+function sampleAnchor(): RawStreamAnchor {
   return {
     streamId: "42field",
     startTime: 1_800_000_000n,
