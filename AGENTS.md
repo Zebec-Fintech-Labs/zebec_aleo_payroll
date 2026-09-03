@@ -175,12 +175,25 @@ Costs: storage (tx bytes), finalize (mapping ops), proof synthesis (per tx). Min
 - Commands: `cd app && yarn install`, `yarn dev`, `yarn build` (`tsc && vite
   build`), `yarn preview`.
 - Architecture: `app/src/payroll/WalletPayrollService.ts` is the wallet-backed
-  counterpart of `sdk/client.ts`'s `PayrollService` — transactions go through
+  counterpart of `sdk/client.ts`'s `StreamService` — transactions go through
   the wallet's `executeTransaction` / `executeDeployment` (never
   ProgramManager), mapping reads through `AleoNetworkClient`. It imports the
   SDK's pure modules (`sdk/plaintext.ts`, `sdk/hashing.ts`, `sdk/math.ts`,
-  `sdk/signing.ts`, `sdk/types.ts`) by relative path; it must NOT import
-  `sdk/client.ts` or `sdk/records.ts`.
+  `sdk/signing.ts`, `sdk/types.ts`) by relative path.
+- **`StreamService` is wallet-only and shared by app and scripts.** Its
+  constructor is `new StreamClient(wallet, { host?, programId?, network? })`
+  where `wallet` implements the `AleoWallet` interface in `sdk/types.ts`
+  (`address`, `decrypt`, `requestRecords`, `executeTransaction`). In the
+  browser that's the Shield adaptor's `useWallet()` context; in Node it's
+  built from a private key via `createAleoWallet(privateKey, network)`
+  (`sdk/wallet.ts` — records via the RecordScanner service, execution via the
+  delegated proving service with retry/backoff; needs `PROVER_API_KEY` /
+  `PROVER_CONSUMER_ID`). The service API is human-facing: amounts are decimal
+  strings in whole token units (converted via `toMicroUnits` /
+  `fromMicroUnits` in `sdk/utils.ts`), while `Raw*` types in `sdk/types.ts`
+  mirror the on-chain structs (bigint micro-units) used by
+  `sdk/plaintext.ts`. `ExecuteOptions.priorityFee` is in **microcredits**
+  (default 100_000).
 - Records-via-wallet pattern: `requestRecords(program, false)` → keep
   `spent === false` → `wallet.decrypt(recordCiphertext)` → single-line
   plaintext → pick highest `microcredits:`/`amount:` record covering the

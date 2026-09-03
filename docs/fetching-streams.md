@@ -221,7 +221,8 @@ async function listPublicStreamIds(client, PROGRAM, account, config, direction) 
 reproduce the on-chain `BHP256::hash_to_field` keys; their derivation is
 covered by SDK parity tests. Hydrate each id with
 `getStreamAnchor` / `getStream` (§2). `WalletStreamService.listMyPublicStreams()`
-and `StreamClient.listPublicStreams(account, config)` already do this and merge the
+and `StreamClient.listPublicStreams(config)` (scoped to the connected wallet)
+already do this and merge the
 two directions into one list with `direction: outgoing | incoming | both`.
 
 Sample the new view functions directly:
@@ -313,7 +314,7 @@ Rules that will bite you if ignored:
 | --- | --- |
 | Read anchor / stream by id | `getProgramMappingValue` + `parseStreamAnchor` / `parseStream` |
 | Preview amounts | `getWithdrawableAmounts(streamId)`, `view fn get_stream` |
-| List public streams for an address | `listPublicStreams(addr)` / `listMyPublicStreams()` (registries, §4.1) |
+| List public streams for the connected wallet | `listPublicStreams(config)` / `listMyPublicStreams()` (registries, §4.1) |
 | Find my tickets | `wallet.requestRecords(prog, false)` → decrypt → classify `ticket_type` |
 | List private streams for a wallet | `listMyPrivateStreams()` (record scan, §4.2) |
 | List all streams (public + private) | `listMyStreams()` |
