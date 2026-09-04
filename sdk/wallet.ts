@@ -158,14 +158,14 @@ export async function createAleoWallet(
   const recordScannerUri =
     options.recordScannerUri ?? process.env.RECORD_SCANNER_URI ?? "https://api.provable.com/scanner";
 
-  const apiKey = options.apiKey ?? process.env.PROVABLE_API_KEY ?? process.env.PROVER_API_KEY;
+  const apiKey = options.apiKey ?? process.env.PROVABLE_API_KEY;
   if (!apiKey) {
-    throw new Error("Missing API key: pass options.apiKey or set PROVER_API_KEY");
+    throw new Error("Missing API key: pass options.apiKey or set PROVABLE_API_KEY");
   }
   const consumerId =
-    options.consumerId ?? process.env.PROVABLE_CONSUMER_ID ?? process.env.PROVER_CONSUMER_ID;
+    options.consumerId ?? process.env.PROVABLE_CONSUMER_ID;
   if (!consumerId) {
-    throw new Error("Missing consumer id: pass options.consumerId or set PROVER_CONSUMER_ID");
+    throw new Error("Missing consumer id: pass options.consumerId or set PROVABLE_CONSUMER_ID");
   }
 
   const networkClient: AnyNetworkClient = isMainnet
