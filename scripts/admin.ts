@@ -12,7 +12,7 @@ dotenv.config();
 
 await initThreadPool();
 
-const PRIVATE_KEY = process.env.PRIVATE_KEY;
+const PRIVATE_KEY = process.env.ADMIN_PRIVATE_KEY;
 
 if (!PRIVATE_KEY) {
     console.error("PRIVATE_KEY environment variable is not set.");
