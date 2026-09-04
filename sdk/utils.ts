@@ -32,6 +32,10 @@ export function toMicroUnits(amount: string | number, decimals = 6): string {
 export function fromMicroUnits(amount: bigint | string | number, decimals = 6): string {
   const micro = BigInt(amount);
   const negative = micro < 0n;
+  // A zero-decimal token has no fractional part; `slice(0, -0)` would
+  // otherwise return an empty integer part and render the whole value as a
+  // fraction (`123` -> `.123`).
+  if (decimals <= 0) return micro.toString();
   const digits = (negative ? -micro : micro).toString().padStart(decimals + 1, "0");
   const intPart = digits.slice(0, -decimals);
   const fracPart = digits.slice(-decimals).replace(/0+$/, "");
