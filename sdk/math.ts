@@ -6,15 +6,11 @@
 
 import type { RawStreamAnchor } from "./types.js";
 
-/** @deprecated Legacy TokenPrice-era constant; the on-chain program no longer
- * uses USD price feeds. Stream fees are admin-signed via `StreamTokenFee`. */
-export const USD_PRICE_DECIMALS_SCALE = 1_000_000n;
-/** @deprecated Legacy TokenPrice-era constant; see {@link USD_PRICE_DECIMALS_SCALE}. */
-export const BPS_DENOMINATOR = 10_000n;
-/** @deprecated Legacy TokenPrice-era constant; see {@link USD_PRICE_DECIMALS_SCALE}. */
-export const DEFAULT_FEE_BPS = 25n;
-const U64_MAX = (1n << 64n) - 1n;
 
+
+export const BPS_DENOMINATOR = 10_000n;
+const U64_MAX = (1n << 64n) - 1n;
+const U128_MAX = (1n << 128n) - 1n;
 export interface StreamFee {
   /** USD value of the stream amount (6 decimals). */
   usdValue: bigint;
@@ -22,23 +18,52 @@ export interface StreamFee {
   streamFee: bigint;
 }
 
-/**
- * Mirror of the removed on-chain `compute_stream_fee` helper.
- * @deprecated The stream fee is now an admin-signed `StreamTokenFee`
- * (`stream_fee_amount` in microcredits); use it directly instead.
- */
+const USD_PRICE_DECIMALS_SCALE = 1_000_000n;
+
+const STREAM_FEE_TIERS = [
+  {
+    minRange: 1n,
+    maxRange: 3_000_000_000n,
+    feeBps: 25n
+  },
+  {
+    minRange: 3_000_000_000n,
+    maxRange: 10_000_000_000n,
+    feeBps: 18n
+  },
+  {
+    minRange: 10_000_000_000n,
+    maxRange: U128_MAX,
+    feeBps: 10n
+  }
+] as const;
+
+export type StreamFeeTier = typeof STREAM_FEE_TIERS[number];
+
+/** Find the appropriate fee tier for a given amount. */
+export function findFeeTier(amount: bigint): StreamFeeTier {
+  for (const tier of STREAM_FEE_TIERS) {
+    if (amount >= tier.minRange && amount < tier.maxRange) {
+      return tier;
+    }
+  }
+  throw new Error(`No fee tier found for amount: ${amount}`);
+}
+
+/** Computes the stream fee for a given amount and token price. */
 export function computeStreamFee(
   amount: bigint,
   tokenPriceUsd: bigint,
-  aleoPriceUsd: bigint,
-  feeBps: bigint,
 ): StreamFee {
   const usdValue = (amount * tokenPriceUsd) / USD_PRICE_DECIMALS_SCALE;
+  const { feeBps } = findFeeTier(usdValue);
   const feeUsd = (usdValue * feeBps) / BPS_DENOMINATOR;
-  const streamFee = (feeUsd * USD_PRICE_DECIMALS_SCALE) / aleoPriceUsd;
-  // The on-chain function asserts both results fit in u64.
-  if (usdValue > U64_MAX || streamFee > U64_MAX) {
-    throw new Error("fee computation exceeds the u64 range");
+  const streamFee = (feeUsd * USD_PRICE_DECIMALS_SCALE) / tokenPriceUsd;
+  if (usdValue > U64_MAX) {
+    throw new Error("USD value computation exceeds the u64 range");
+  }
+  if (streamFee > U128_MAX) {
+    throw new Error("fee computation exceeds the u128 range");
   }
   return { usdValue, streamFee };
 }
