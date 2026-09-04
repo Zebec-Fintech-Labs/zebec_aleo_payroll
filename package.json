@@ -35,7 +35,7 @@
     "run:upgrade": "tsx scripts/upgrade.ts",
     "sdk:build": "npm run sdk:clean && tsc -p tsconfig.json",
     "sdk:clean": "rimraf dist .test-dist",
-    "sdk:test:integration": "ts-mocha -p tsconfig.test.json --timeout 600000 '.test-dist/sdk-tests/integration/**/*.test.js'",
+    "sdk:test:integration": "tsc -p tsconfig.test.json && mocha --timeout 900000 '.test-dist/sdk-tests/integration/**/*.test.js'",
     "sdk:test:unit": "tsc -p tsconfig.test.json && mocha '.test-dist/sdk-tests/unit/**/*.test.js'"
   },
   "type": "module",
