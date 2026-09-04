@@ -71,7 +71,6 @@ if (!RECEIVER_PRIVATE_KEY) {
 }
 
 const HOST = process.env.ENDPOINT ?? "https://api.explorer.provable.com/v1";
-console.log("HOST:", HOST);
 
 const senderWallet = await createAleoWallet(SENDER_PRIVATE_KEY, Network.TESTNET, { host: HOST });
 const receiverWallet = await createAleoWallet(RECEIVER_PRIVATE_KEY, Network.TESTNET, { host: HOST });
@@ -131,16 +130,6 @@ async function getConfigInput(): Promise<Config> {
 }
 
 /**
- * Compute the stream fee in stream-token micro-units from the off-chain USD
- * value of the stream and the flat DEFAULT_FEE_BPS tier.
- */
-function computeSignedFeeAmount(streamAmountMicro: bigint): bigint {
-    const { usdValue } = computeStreamFee(streamAmountMicro, TOKEN_PRICE_USD, ALEO_PRICE_USD, DEFAULT_FEE_BPS);
-    // feeUsd (6 decimals) converted into token units at the token's USD price.
-    return (usdValue * DEFAULT_FEE_BPS * 1_000_000n) / (BPS_DENOMINATOR * TOKEN_PRICE_USD);
-}
-
-/**
  * Build a fresh admin-signed `StreamTokenFee` attestation: the raw (micro-unit)
  * form for the Schnorr signature and the human form for the client.
  */
@@ -148,17 +137,17 @@ function createSignedTokenFee(streamAmountMicro: bigint): {
     tokenFee: StreamTokenFee;
     signature: string;
 } {
-    const streamFeeAmount = computeSignedFeeAmount(streamAmountMicro);
+    const { streamFee } = computeStreamFee(streamAmountMicro, TOKEN_PRICE_USD);
     const rawFee: RawStreamTokenFee = {
         config: CONFIG_NAME,
         streamToken: TOKEN_PROGRAM,
-        streamFeeAmount,
+        streamFeeAmount: streamFee,
         expiry: nowSeconds() + 3600n,
         nonce: randomField(),
     };
     const tokenFee: StreamTokenFee = {
         ...rawFee,
-        streamFeeAmount: fromMicroUnits(streamFeeAmount, TOKEN_DECIMALS),
+        streamFeeAmount: fromMicroUnits(streamFee, TOKEN_DECIMALS),
     };
     return { tokenFee, signature: signStreamTokenFee(ADMIN_PRIVATE_KEY!, rawFee) };
 }
