@@ -3,10 +3,13 @@ import { Plaintext } from "@provablehq/sdk";
 import { describe, it } from "mocha";
 
 import {
+  classifyTicket,
   configToPlaintext,
   createStreamParamsToPlaintext,
   fieldLiteral,
+  i64Literal,
   identLiteral,
+  matchesTicketRecord,
   merkleProofToPlaintext,
   merkleProofsToPlaintext,
   parseStream,
@@ -23,6 +26,8 @@ import {
   streamToPlaintext,
   streamAnchorToPlaintext,
   streamTokenFeeToPlaintext,
+  stripVisibilitySuffix,
+  u64Literal,
 } from "../../sdk/plaintext.js";
 import type { RawStream, RawStreamAnchor } from "../../sdk/types.js";
 
@@ -349,5 +354,255 @@ describe("ticket parsers", () => {
     assert.equal(t.autoWithdrawable, true);
     assert.equal(t.tokenProgram, "test_usdcx_stablecoin");
     assert.equal(t.fullAmount, 2_000_000n);
+  });
+});
+
+// ===========================================================================
+// Edge cases derived from `src/main.leo`
+// ===========================================================================
+
+describe("literal helpers — edge cases", () => {
+  it("rejects values the snarkVM field parser will not accept", () => {
+    assert.throws(() => fieldLiteral("abc"));
+    assert.throws(() => fieldLiteral(""));
+    assert.throws(() => fieldLiteral("42fields"));
+  });
+
+  it("reduces out-of-range field values modulo the field prime", () => {
+    // Stream ids and fee nonces are caller-supplied; anything at or above the
+    // prime wraps rather than erroring, so two distinct off-chain ids can map
+    // to the same on-chain `stream_id`.
+    assert.equal(
+      fieldLiteral("-1"),
+      "8444461749428370424248824938781546531375899335154063827935233455917409239040field",
+    );
+    assert.equal(fieldLiteral("9".repeat(80)), fieldLiteral("9".repeat(80)));
+  });
+
+  it("accepts identifiers up to the 31-character Leo limit", () => {
+    assert.equal(identLiteral("a".repeat(31)), `'${"a".repeat(31)}'`);
+    assert.throws(() => identLiteral("a".repeat(32)));
+    assert.throws(() => identLiteral(""));
+    assert.throws(() => identLiteral("Token")); // uppercase
+    assert.throws(() => identLiteral("_token")); // must start with a letter
+    assert.throws(() => identLiteral("9token")); // must start with a letter
+  });
+
+  it("renders signed and unsigned integer literals", () => {
+    assert.equal(u64Literal("42"), "42u64");
+    assert.equal(u64Literal(0), "0u64");
+    assert.equal(i64Literal(-5), "-5i64");
+    // `now` inputs are i64 and legitimately pre-epoch in tests/backfills.
+    assert.equal(i64Literal(-1_800_000_000n), "-1800000000i64");
+  });
+});
+
+describe("struct serializers — edge cases", () => {
+  it("serializes an anchor at the u128 / i64 extremes", () => {
+    const extreme: RawStreamAnchor = {
+      ...sampleAnchor(),
+      startTime: -1n,
+      canceledAt: -1_800_000_000n,
+      duration: (1n << 64n) - 1n,
+      depositedAmount: (1n << 128n) - 1n,
+      withdrawnAmount: 0n,
+      pausedInterval: (1n << 64n) - 1n,
+    };
+    // `validated()` runs the snarkVM parser, so an out-of-range member throws.
+    assert.deepEqual(parseStreamAnchor(streamAnchorToPlaintext(extreme)), extreme);
+    assert.throws(() => streamAnchorToPlaintext({ ...extreme, duration: 1n << 64n }));
+    assert.throws(() =>
+      streamAnchorToPlaintext({ ...extreme, depositedAmount: 1n << 128n }),
+    );
+  });
+
+  it("round-trips a paused, canceled anchor", () => {
+    const anchor: RawStreamAnchor = {
+      ...sampleAnchor(),
+      paused: true,
+      canceled: true,
+      canceledAt: 1_800_003_600n,
+      lastPausedTime: 1_800_001_800n,
+      pausedInterval: 600n,
+      isPublic: true,
+    };
+    assert.deepEqual(parseStreamAnchor(streamAnchorToPlaintext(anchor)), anchor);
+  });
+
+  it("rejects merkle proofs with the wrong sibling count", () => {
+    const siblings = (n: number) => Array.from({ length: n }, (_, i) => BigInt(i));
+    assert.throws(() => merkleProofToPlaintext({ siblings: siblings(15), leafIndex: 0 }));
+    assert.throws(() => merkleProofToPlaintext({ siblings: siblings(17), leafIndex: 0 }));
+    assert.throws(() => merkleProofToPlaintext({ siblings: [], leafIndex: 0 }));
+    assert.ok(
+      merkleProofToPlaintext({ siblings: siblings(16), leafIndex: 0 }).includes(
+        "leaf_index: 0u32",
+      ),
+    );
+  });
+
+  it("keeps StreamTokenFee member order stable (signature preimage)", () => {
+    // Reordering these members changes `BHP256::hash_to_field(token_fee)` and
+    // silently invalidates every admin signature.
+    const text = streamTokenFeeToPlaintext({
+      config: 1n,
+      streamToken: "t",
+      streamFeeAmount: 0n,
+      expiry: 0n,
+      nonce: 0n,
+    });
+    assert.deepEqual(
+      [...parseStructMembers(text).keys()],
+      ["config", "stream_token", "stream_fee_amount", "expiry", "nonce"],
+    );
+  });
+
+  it("keeps CreateStreamParams member order stable", () => {
+    const text = createStreamParamsToPlaintext({
+      receiver: RECEIVER,
+      streamId: 1n,
+      amount: 1n,
+      startTime: 0n,
+      duration: 1n,
+      isCancelable: false,
+      isPausable: false,
+      autoWithdrawable: false,
+      withdrawFrequency: 0n,
+      startNow: true,
+      canTopup: false,
+      initialBufferAmount: 0n,
+    });
+    assert.deepEqual(
+      [...parseStructMembers(text).keys()],
+      [
+        "receiver",
+        "stream_id",
+        "amount",
+        "start_time",
+        "duration",
+        "is_cancelable",
+        "is_pausable",
+        "auto_withdrawable",
+        "withdraw_frequency",
+        "start_now",
+        "can_topup",
+        "initial_buffer_amount",
+      ],
+    );
+  });
+
+  it("keeps Config member order stable", () => {
+    const text = configToPlaintext({
+      configName: 1n,
+      admin: ADMIN,
+      feeVault: ADMIN,
+      withdrawer: ADMIN,
+      baseFee: 0n,
+      platformFee: 0n,
+    });
+    assert.deepEqual(
+      [...parseStructMembers(text).keys()],
+      ["config_name", "admin", "fee_vault", "withdrawer", "base_fee", "platform_fee"],
+    );
+  });
+});
+
+describe("parsers — edge cases", () => {
+  it("rejects values that are not struct literals", () => {
+    assert.throws(() => parseStructMembers("42field"), /not a struct literal/);
+    assert.throws(() => parseStructMembers("{ a: 1u8"), /not a struct literal/);
+    assert.throws(() => parseStructMembers("{ a 1u8 }"), /malformed struct member/);
+  });
+
+  it("handles empty and trailing-comma struct bodies", () => {
+    assert.equal(parseStructMembers("{}").size, 0);
+    assert.equal(parseStructMembers("{ a: 1u8, }").get("a"), "1u8");
+  });
+
+  it("splits members whose values contain commas", () => {
+    const members = parseStructMembers(
+      "{ proof: { siblings: [1field, 2field], leaf_index: 0u32 }, ok: true }",
+    );
+    assert.equal(members.size, 2);
+    assert.equal(members.get("proof"), "{ siblings: [1field, 2field], leaf_index: 0u32 }");
+    assert.equal(members.get("ok"), "true");
+  });
+
+  it("reports the first missing member by name", () => {
+    assert.throws(
+      () => parseStreamAnchor("{ stream_id: 42field }"),
+      /missing struct member: start_time/,
+    );
+    assert.throws(
+      () => parseStream("{ stream_id: 42field, config: 7field }"),
+      /missing struct member: sender/,
+    );
+    assert.throws(
+      () => parseStreamConfig(`{ admin: ${ADMIN} }`),
+      /missing struct member: fee_vault/,
+    );
+  });
+
+  it("rejects empty mapping values (absent key read as a value)", () => {
+    assert.throws(() => parseStream(""), /empty/);
+    assert.throws(() => parseStreamAnchor(""), /empty/);
+    assert.throws(() => parseStreamConfig(""), /empty/);
+    assert.throws(() => parseSenderTicket(""), /empty/);
+  });
+
+  it("rejects malformed leaf literals", () => {
+    assert.throws(() => parseIntLiteral("5"), /not an integer literal/); // no suffix
+    assert.throws(() => parseIntLiteral("5field"), /not an integer literal/);
+    assert.throws(() => parseIntLiteral("5u256"), /not an integer literal/);
+    assert.throws(() => parseIdentLiteral("my_token"), /not an identifier literal/); // unquoted
+    assert.throws(() => parseIdentLiteral("'My_Token'"), /not an identifier literal/);
+    assert.throws(() => parseFieldLiteral("nope"));
+  });
+
+  it("does not range-check the integer type suffix", () => {
+    // The regex accepts a sign on any width, so a forged `-5u64` parses. Values
+    // reaching the parsers come from the chain, which cannot produce these.
+    assert.equal(parseIntLiteral("-5u64"), -5n);
+    assert.equal(parseIntLiteral("999999999999999999999999999999999999999u8"), 999999999999999999999999999999999999999n);
+  });
+
+  it("strips one visibility suffix, and only at the end", () => {
+    assert.equal(stripVisibilitySuffix("1u64.private"), "1u64");
+    assert.equal(stripVisibilitySuffix(" 1u64.public "), "1u64");
+    assert.equal(stripVisibilitySuffix("1u64"), "1u64");
+    assert.equal(stripVisibilitySuffix("1u64.private.private"), "1u64.private");
+    // Not a suffix: token program ids keep their `.aleo`.
+    assert.equal(stripVisibilitySuffix("credits.aleo"), "credits.aleo");
+  });
+});
+
+describe("ticket classification — edge cases", () => {
+  const ticket = (type: number) => `{ owner: ${ADMIN}, ticket_type: ${type}u8, stream_id: 1field }`;
+
+  it("classifies each on-chain ticket_type", () => {
+    assert.equal(classifyTicket(ticket(0)), "SenderStreamTicket");
+    assert.equal(classifyTicket(ticket(1)), "ReceiverStreamTicket");
+    assert.equal(classifyTicket(ticket(2)), "WithdrawerStreamTicket");
+  });
+
+  it("returns undefined for non-ticket and unknown-type records", () => {
+    assert.equal(classifyTicket(`{ owner: ${ADMIN}, amount: 5u128 }`), undefined);
+    assert.equal(classifyTicket(ticket(3)), undefined);
+    assert.equal(classifyTicket(""), undefined);
+  });
+
+  it("matchesTicketRecord only matches its own type", () => {
+    assert.equal(matchesTicketRecord(ticket(0), "SenderStreamTicket"), true);
+    assert.equal(matchesTicketRecord(ticket(0), "ReceiverStreamTicket"), false);
+    assert.equal(matchesTicketRecord(ticket(2), "WithdrawerStreamTicket"), true);
+    assert.equal(matchesTicketRecord("{ amount: 5u128 }", "SenderStreamTicket"), false);
+  });
+
+  it("rejects a ticket parsed as the wrong type by name", () => {
+    assert.throws(
+      () => parseWithdrawerTicket(ticket(0)),
+      /not a ticket_type 2 record \(got 0u8\)/,
+    );
+    assert.throws(() => parseSenderTicket("{ owner: x }"), /missing struct member: ticket_type/);
   });
 });

@@ -3,6 +3,7 @@ import { describe, it } from "mocha";
 
 import {
   configNameToField,
+  hashPlaintextToField,
   streamCountKey,
   streamRefKey,
   streamTokenFeeMessage,
@@ -137,6 +138,111 @@ describe("hashing — StreamCountKey (known on-chain vector)", () => {
     assert.notEqual(
       streamCountKey(REF_KEY_ADDRESS, REF_KEY_CONFIG),
       streamCountKey(REF_KEY_ADDRESS, 54321n),
+    );
+  });
+});
+
+// ===========================================================================
+// Edge cases derived from `src/main.leo`
+// ===========================================================================
+
+describe("hashing — key derivation edge cases", () => {
+  const ACCOUNT = REF_KEY_ADDRESS;
+
+  it("accepts a config as a bare string, a suffixed literal or a bigint", () => {
+    assert.equal(whitelistKey("12345", "my_token"), whitelistKey(12345n, "my_token"));
+    assert.equal(whitelistKey("12345field", "my_token"), whitelistKey(12345n, "my_token"));
+    assert.equal(streamCountKey(ACCOUNT, "12345"), streamCountKey(ACCOUNT, 12345n));
+    assert.equal(streamRefKey(ACCOUNT, "12345", 2), streamRefKey(ACCOUNT, 12345n, 2n));
+  });
+
+  it("separates whitelist entries per config and per token", () => {
+    // `WhitelistKey { config, token_program }` scopes the whitelist to one
+    // tenant: whitelisting a token under one config must not leak to another.
+    assert.notEqual(whitelistKey(1n, "my_token"), whitelistKey(2n, "my_token"));
+    assert.notEqual(whitelistKey(1n, "my_token"), whitelistKey(1n, "my_token2"));
+  });
+
+  it("rejects token programs that are not Leo identifiers", () => {
+    // The on-chain member is an `identifier`, so a program id with `.aleo`
+    // would hash to a key the program never writes.
+    assert.throws(() => whitelistKey(1n, "my_token.aleo"));
+    assert.throws(() => whitelistKey(1n, "My_Token"));
+  });
+
+  it("separates registry slots per account, per config and per index", () => {
+    assert.notEqual(streamRefKey(ACCOUNT, 1n, 0), streamRefKey(ACCOUNT, 1n, 1));
+    assert.notEqual(streamRefKey(ACCOUNT, 1n, 0), streamRefKey(ACCOUNT, 2n, 0));
+    assert.notEqual(
+      streamRefKey(ACCOUNT, 1n, 0),
+      streamRefKey("aleo1ezamst4pjgj9zfxqq0fwfj8a4cjuqndmasgata3hggzqygggnyfq6kmyd4", 1n, 0),
+    );
+  });
+
+  it("does not collide a count key with the index-0 ref key", () => {
+    // `StreamCountKey` and `StreamRefKey` share a mapping-key space only by
+    // accident of both being fields; the extra `index` member separates them.
+    assert.notEqual(streamCountKey(ACCOUNT, 1n), streamRefKey(ACCOUNT, 1n, 0));
+  });
+
+  it("handles the u64 index bounds used by the registries", () => {
+    const max = (1n << 64n) - 1n;
+    assert.match(streamRefKey(ACCOUNT, 1n, max), /^\d+field$/);
+    assert.throws(() => streamRefKey(ACCOUNT, 1n, max + 1n));
+    assert.throws(() => streamRefKey(ACCOUNT, 1n, -1n));
+  });
+
+  it("rejects plaintext that snarkVM cannot parse", () => {
+    assert.throws(() => hashPlaintextToField("not a struct"));
+    assert.throws(() => hashPlaintextToField("{ a: }"));
+  });
+});
+
+describe("configNameToField — edge cases", () => {
+  it("is byte-sensitive", () => {
+    assert.notEqual(configNameToField("Stream_Config_001"), configNameToField("stream_config_001"));
+    assert.notEqual(configNameToField("zebec"), configNameToField("zebec "));
+    assert.notEqual(configNameToField("zebec"), configNameToField("zebe c"));
+  });
+
+  it("hashes multi-byte utf-8 names deterministically", () => {
+    const emoji = configNameToField("🎉 payroll");
+    assert.match(emoji, /^\d+field$/);
+    assert.equal(emoji, configNameToField("🎉 payroll"));
+  });
+
+  it("maps the empty name onto the 0field sentinel", () => {
+    // BHP256 over zero bits is 0field, which is also what
+    // `get_outgoing_stream_ref` returns for an absent slot — never derive a
+    // config from an empty name.
+    assert.equal(configNameToField(""), "0field");
+  });
+});
+
+describe("streamTokenFeeMessage — binding", () => {
+  const base = {
+    config: 12345n,
+    streamToken: "token",
+    streamFeeAmount: 50_000n,
+    expiry: 1_893_456_000n,
+    nonce: 5n,
+  };
+
+  it("binds every member of the signed fee", () => {
+    // `assert_token_fee_binding` checks config/token/expiry on-chain, but the
+    // signature must cover them too, or a different binding could be replayed.
+    const message = streamTokenFeeMessage(base);
+    assert.notEqual(message, streamTokenFeeMessage({ ...base, config: 12346n }));
+    assert.notEqual(message, streamTokenFeeMessage({ ...base, streamToken: "token2" }));
+    assert.notEqual(message, streamTokenFeeMessage({ ...base, expiry: 1_893_456_001n }));
+    assert.notEqual(message, streamTokenFeeMessage({ ...base, streamFeeAmount: 50_001n }));
+    assert.notEqual(message, streamTokenFeeMessage({ ...base, nonce: 6n }));
+  });
+
+  it("accepts a zero fee amount and a zero nonce", () => {
+    assert.match(
+      streamTokenFeeMessage({ ...base, streamFeeAmount: 0n, nonce: 0n }),
+      /^\d+field$/,
     );
   });
 });
