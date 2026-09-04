@@ -63,24 +63,27 @@ export {
   streamCountKey,
   streamRefKey,
   streamTokenFeeMessage,
-  tokenPriceMessage, // @deprecated
 } from "./hashing.js";
 
 export {
-  computeStreamFee, // @deprecated
+  computeStreamFee,
   computeAutoWithdrawalFee,
   computeTopupAmount,
   computeWithdrawableAmount,
+  findFeeTier,
   isWithdrawFrequencyValid,
   nowSeconds,
-  USD_PRICE_DECIMALS_SCALE, // @deprecated
-  BPS_DENOMINATOR, // @deprecated
-  DEFAULT_FEE_BPS, // @deprecated
+  USD_PRICE_DECIMALS_SCALE,
+  BPS_DENOMINATOR,
   DEFAULT_WITHDRAW_FREQUENCY,
-  SPLIT_FEE, // @deprecated
   WITHDRAW_FREQUENCIES,
 } from "./math.js";
-export type { StreamFee, TopupAmount, WithdrawableAmounts } from "./math.js";
+export type {
+  StreamFee,
+  StreamFeeTier,
+  TopupAmount,
+  WithdrawableAmounts,
+} from "./math.js";
 
 export {
   signStreamTokenFee,
