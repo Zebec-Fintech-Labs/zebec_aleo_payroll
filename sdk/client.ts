@@ -24,7 +24,6 @@ import {
 import {
   CREDITS_PROGRAM_ID,
   DEFAULT_ALEO_ENDPOINT,
-  Network,
   STABLE_COINS_CONFIGS,
   ZEBEC_STREAM_PROGRAM_ID,
 } from "./config.js";
@@ -90,7 +89,7 @@ import {
 import type { WithdrawableAmounts } from "./math.js";
 
 export const DEFAULT_ENDPOINT = DEFAULT_ALEO_ENDPOINT;
-export const PROGRAM_ID = ZEBEC_STREAM_PROGRAM_ID[Network.TESTNET]!;
+export const PROGRAM_ID = ZEBEC_STREAM_PROGRAM_ID;
 
 /** Default priority fee: 0.1 ALEO in microcredits. */
 const DEFAULT_PRIORITY_FEE = 100_000;
@@ -99,18 +98,11 @@ export class StreamService {
   readonly wallet: AleoWallet;
   readonly programId: string;
   readonly host: string;
-  readonly network: Network;
   readonly networkClient: AleoNetworkClient;
 
   constructor(wallet: AleoWallet, options: StreamServiceOptions = {}) {
-    this.network = options.network ?? Network.TESTNET;
     this.host = options.host ?? DEFAULT_ALEO_ENDPOINT;
-    const programId = options.programId ?? ZEBEC_STREAM_PROGRAM_ID[this.network];
-    if (programId === undefined) {
-      throw new Error(
-        `no default stream program id for ${this.network}; pass options.programId`,
-      );
-    }
+    const programId = options.programId ?? ZEBEC_STREAM_PROGRAM_ID;
     this.programId = programId;
     this.wallet = wallet;
     this.networkClient = new AleoNetworkClient(this.host);
@@ -303,11 +295,11 @@ export class StreamService {
     // lower estimate would make the credit-record coverage assert fail.
     const autoWithdrawalFee = params.autoWithdrawable
       ? computeAutoWithdrawalFee(
-          parsedParams.duration,
-          parsedParams.withdrawFrequency,
-          parsedConfig.baseFee,
-          parsedConfig.platformFee,
-        )
+        parsedParams.duration,
+        parsedParams.withdrawFrequency,
+        parsedConfig.baseFee,
+        parsedConfig.platformFee,
+      )
       : 0n;
     const creditRecord =
       options.creditRecord !== undefined
@@ -317,9 +309,9 @@ export class StreamService {
       options.tokenRecord !== undefined
         ? options.tokenRecord.toString()
         : await this.findToken(
-            tokenProgramId,
-            depositAmount + parsedTokenFee.streamFeeAmount,
-          );
+          tokenProgramId,
+          depositAmount + parsedTokenFee.streamFeeAmount,
+        );
     const merkleProofs = await this.getComplianceProofs(
       this.tokenStablecoinKey(tokenProgram),
       this.wallet.address,
@@ -724,9 +716,9 @@ export class StreamService {
     stablecoinKey: "usad" | "usdcx",
     senderAddress: string,
   ): Promise<string> {
-    const config = STABLE_COINS_CONFIGS[this.network];
+    const config = STABLE_COINS_CONFIGS.default;
     if (config === undefined) {
-      throw new Error(`no stablecoin freeze-list configuration for ${this.network}`);
+      throw new Error(`no stablecoin freeze-list configuration`);
     }
     const res = await fetch(config.freezeListApi[stablecoinKey]);
     if (!res.ok) {

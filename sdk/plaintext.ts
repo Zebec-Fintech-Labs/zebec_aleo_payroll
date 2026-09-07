@@ -166,7 +166,9 @@ export function merkleProofsToPlaintext(proofs: [MerkleProof, MerkleProof]): str
  * while mapping queries return bare literals; stripping here normalizes both.
  */
 export function stripVisibilitySuffix(value: string): string {
-  return value.replace(/\.(?:private|public|constant)$/i, "").trim();
+  // Trim first: the suffix is anchored to the end, so surrounding whitespace
+  // from a pretty-printed member value would otherwise hide it.
+  return value.trim().replace(/\.(?:private|public|constant)$/i, "").trim();
 }
 
 /** Split a struct body into top-level `name: value` members. */

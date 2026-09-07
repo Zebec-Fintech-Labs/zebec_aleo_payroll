@@ -18,7 +18,7 @@ export interface StreamFee {
   streamFee: bigint;
 }
 
-const USD_PRICE_DECIMALS_SCALE = 1_000_000n;
+export const USD_PRICE_DECIMALS_SCALE = 1_000_000n;
 
 const STREAM_FEE_TIERS = [
   {
@@ -240,11 +240,3 @@ export function computeAutoWithdrawalFee(
 
 /** Daily fallback used by the on-chain program to guard division by zero. */
 export const DEFAULT_WITHDRAW_FREQUENCY = 86_400n;
-
-/**
- * @deprecated Legacy constant from when `create_stream_private` split the
- * credit record (the split burned 10,000 microcredits). The program now pays
- * the auto-withdrawal fee with a direct `credits.aleo::transfer_private` and
- * the stream fee in the streaming token, so no split burn applies.
- */
-export const SPLIT_FEE = 10_000n;

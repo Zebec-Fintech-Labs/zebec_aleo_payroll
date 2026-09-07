@@ -31,13 +31,10 @@ import { Field, initThreadPool } from "@provablehq/sdk/testnet.js";
 import dotenv from "dotenv";
 import { setTimeout } from "node:timers/promises";
 import {
-    BPS_DENOMINATOR,
     computeStreamFee,
     configNameToField,
     createAleoWallet,
-    DEFAULT_FEE_BPS,
     fromMicroUnits,
-    Network,
     nowSeconds,
     StreamClient,
     signStreamTokenFee,
@@ -72,8 +69,8 @@ if (!RECEIVER_PRIVATE_KEY) {
 
 const HOST = process.env.ENDPOINT ?? "https://api.explorer.provable.com/v1";
 
-const senderWallet = await createAleoWallet(SENDER_PRIVATE_KEY, Network.TESTNET, { host: HOST });
-const receiverWallet = await createAleoWallet(RECEIVER_PRIVATE_KEY, Network.TESTNET, { host: HOST });
+const senderWallet = await createAleoWallet(SENDER_PRIVATE_KEY, { host: HOST });
+const receiverWallet = await createAleoWallet(RECEIVER_PRIVATE_KEY, { host: HOST });
 const senderClient = new StreamClient(senderWallet, { host: HOST });
 const receiverClient = new StreamClient(receiverWallet, { host: HOST });
 const sender = senderWallet.address;
@@ -90,7 +87,6 @@ const CONFIG_NAME = configNameToField("Stream_Config_001");
 const TOKEN_PROGRAM = "test_usdcx_stablecoin";
 const TOKEN_DECIMALS = 6;
 const TOKEN_PRICE_USD = 1_000_000n; // $1.00 per token, 6 decimals (used for off-chain fee quote only)
-const ALEO_PRICE_USD = 200_000n;  // $0.20 per ALEO, 6 decimals (used for off-chain fee quote only)
 const PRIORITY_FEE = 100_000; // 0.1 ALEO, in microcredits
 
 const STREAM_PARAMS: CreateStreamParams = {

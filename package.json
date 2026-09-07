@@ -31,12 +31,12 @@
     "clean": "leo clean",
     "run:admin": "tsx scripts/admin.ts",
     "run:deploy": "tsx scripts/deploy.ts",
-    "run:payroll": "tsx scripts/payroll.ts",
+    "run:stream": "tsx scripts/stream.ts",
     "run:upgrade": "tsx scripts/upgrade.ts",
     "sdk:build": "npm run sdk:clean && tsc -p tsconfig.json",
-    "sdk:clean": "rimraf dist .test-dist",
-    "sdk:test:integration": "ts-mocha -p tsconfig.test.json --timeout 600000 '.test-dist/sdk-tests/integration/**/*.test.js'",
-    "sdk:test:unit": "tsc -p tsconfig.test.json && mocha '.test-dist/sdk-tests/unit/**/*.test.js'"
+    "sdk:clean": "rimraf dist",
+    "sdk:test": "mocha --spec 'sdk-tests/**/*.test.ts'",
+    "test": "mocha --spec 'tests/**/*.test.ts'"
   },
   "type": "module",
   "types": "dist/index.d.ts",
