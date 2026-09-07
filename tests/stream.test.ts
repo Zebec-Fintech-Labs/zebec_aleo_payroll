@@ -316,7 +316,7 @@ describe("testnet integration: stream lifecycle", function () {
       const anchor = await senderClient.getStreamAnchor(streamId);
       assert.equal(anchor.canceled, false);
       assert.equal(anchor.isPublic, false);
-      assert.equal(anchor.depositedAmount, toMicroUnits("2", TOKEN_DECIMALS));
+      assert.equal(anchor.depositedAmount, microAmount("2"));
     });
 
     it("pauses and resumes", async () => {
