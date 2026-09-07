@@ -166,7 +166,11 @@ struct StreamTokenFee {
     config: field,
     // Stream token identifier.
     stream_token: identifier,
-    // Admin-signed stream fee amount in microcredits.
+    // Admin-signed stream fee amount, denominated in the streaming token's
+    // own units (a u128) — NOT ALEO microcredits. Collected via
+    // `IARC22::split`/`transfer_private` (private) or
+    // `IARC22::transfer_from_public` (public); see `create_stream_private`/
+    // `create_stream_public`.
     stream_fee_amount: u128,
     // Expiry of this signed fee object.
     expiry: i64,
@@ -187,11 +191,6 @@ struct Config {
 // auto-withdrawal is disabled, because Leo flattens ternary branches so the
 // division inside compute_auto_withdrawal_fee is always evaluated.
 const DEFAULT_WITHDRAW_FREQUENCY: u64 = 60u64 * 60u64 * 24u64; // daily
-
-// Fee burned by credits.aleo::split, deducted from the second output record.
-// The credit-record coverage assertion includes this to prevent a silent
-// underflow during proving.
-const SPLIT_FEE: u64 = 10_000u64;
 
 const WITHDRAW_FREQUENCIES_LEN: u8 = 11u8;
 
@@ -279,6 +278,14 @@ program test_zebec_stream_v3.aleo {
         auto_withdrawable: bool,
     }
     
+    // Create a private-mode stream: mints the three ticket records and funds
+    // the fee/deposit from the caller's private token and credit records.
+    // Its `final {}` block below duplicates `create_stream_public`'s
+    // verification checklist (config match, signed-fee binding + replay
+    // guard, token whitelist, stream-id freshness, anchor write) by hand —
+    // there is no shared `finalize_create_stream` helper (see
+    // `assert_token_fee_binding`'s comment). Keep the two in sync manually
+    // when editing either one.
     fn create_stream_private(
         params: CreateStreamParams,
         token_program: identifier,
@@ -339,7 +346,7 @@ program test_zebec_stream_v3.aleo {
         let (change1, change2): (credits.aleo::credits, credits.aleo::credits) =
             credits.aleo::transfer_private(credit_input_record, config.withdrawer, auto_withdrawal_fee);
 
-        // these changes with be consumed so, no need to return them.
+        // These changes will be consumed by the transfers below, so no need to return them.
         let (token_change1, token_change2): (dyn record, dyn record) =
             IARC22@(token_program)::split(token_input_record, token_fee.stream_fee_amount);
         
@@ -801,6 +808,13 @@ program test_zebec_stream_v3.aleo {
         });
     }
 
+    // Create a public-mode stream: pulls the fee/deposit from the caller's
+    // public token balance via `transfer_from_public` (requires a prior
+    // `approve_public` covering `stream_fee_amount + deposit`). Its
+    // `final {}` block below duplicates `create_stream_private`'s
+    // verification checklist inline (see that function's comment for why),
+    // plus additionally writes the public `Stream` mapping entry and appends
+    // the sender's/receiver's per-config registry entries.
     fn create_stream_public(
         params: CreateStreamParams,
         token_program: identifier,
@@ -1036,6 +1050,10 @@ program test_zebec_stream_v3.aleo {
         };
     }
 
+    // Top up a public stream. Sender only (see `assert(caller == stream.sender)`
+    // below): same debt-first, capped-extra math as `topup_stream_private`,
+    // funded via `transfer_from_public` (requires a prior `approve_public`
+    // covering at least `amount`).
     fn topup_stream_public(
         stream: Stream,
         stream_anchor: StreamAnchor,
@@ -1399,6 +1417,9 @@ program test_zebec_stream_v3.aleo {
         return whitelisted_token_programs.get_or_use(whitelist_key, false);
     }
 
+    // Only this address may deploy upgrades to this program (Leo
+    // admin-upgrade mode); this constructor's own logic becomes immutable
+    // once the program is first deployed.
     @admin(address="aleo12czxn500cyj9a7lweuft6r4rrckthfck5k8440qh7atgrnt5kupqsfh038")
     constructor() {}
 }
@@ -1492,8 +1513,12 @@ fn assert_config_fields(chain: StreamConfig, provided: Config) {
 }
 
 // Read-only binding/expiry checks for the admin-signed token fee. The
-// nonce-consume and the Schnorr signature verification must stay in the
-// finalize_create_stream helper (mapping + finalize-context intrinsic).
+// nonce-consume (`token_fee_nonces`) and the Schnorr signature verification
+// stay inline in each create entry's own `final {}` block instead of here,
+// because they need mapping access — a plain `fn` can't read/write mappings.
+// `create_stream_private` and `create_stream_public` do NOT share a
+// `finalize_create_stream` helper; they each inline the same checklist
+// independently (see the comments on both functions below).
 fn assert_token_fee_binding(
     token_fee: StreamTokenFee,
     config: Config,

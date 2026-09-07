@@ -1,10 +1,9 @@
 {
-  "author": "Zebec Network | Ashish Sapkota",
+  "author": "Zebec Network | Ashish Sapkota | Roshan Shrestha",
   "dependencies": {
     "@provablehq/sdk": "^0.11.6",
     "bignumber.js": "^11.1.5"
   },
-  "description": "TypeScript SDK for the test_zebec_stream_v3.aleo program",
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "^26.1.2",
@@ -24,8 +23,7 @@
     "dist"
   ],
   "license": "MIT",
-  "main": "dist/index.js",
-  "name": "zebec-payroll-sdk",
+  "name": "zebec-aleo-stream",
   "scripts": {
     "build": "leo clean && leo build",
     "clean": "leo clean",
@@ -39,6 +37,5 @@
     "test": "mocha --spec 'tests/**/*.test.ts'"
   },
   "type": "module",
-  "types": "dist/index.d.ts",
   "version": "1.0.0"
 }

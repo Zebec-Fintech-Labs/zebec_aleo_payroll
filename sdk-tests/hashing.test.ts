@@ -206,9 +206,9 @@ describe("configNameToField — edge cases", () => {
   });
 
   it("hashes multi-byte utf-8 names deterministically", () => {
-    const emoji = configNameToField("🎉 payroll");
+    const emoji = configNameToField("🎉 stream");
     assert.match(emoji, /^\d+field$/);
-    assert.equal(emoji, configNameToField("🎉 payroll"));
+    assert.equal(emoji, configNameToField("🎉 stream"));
   });
 
   it("maps the empty name onto the 0field sentinel", () => {
