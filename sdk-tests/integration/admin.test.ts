@@ -75,7 +75,7 @@ describe("testnet integration: admin lifecycle", function () {
 
   let client: StreamClient;
   let admin: string;
-  const TOKEN = "my_token";
+  const TOKEN = "test_usdcx_stablecoin"; // testnet USDCx token program ID
 
   before(async () => {
     const wallet = await createAleoWallet(PRIVATE_KEY, Network.TESTNET, { host: HOST });
