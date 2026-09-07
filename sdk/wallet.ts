@@ -22,17 +22,9 @@ import {
   NetworkRecordProvider,
   ProgramManager,
   RecordScanner,
-} from "@provablehq/sdk";
-import {
-  Account as TAccount,
-  AleoKeyProvider as TAleoKeyProvider,
-  AleoNetworkClient as TAleoNetworkClient,
-  NetworkRecordProvider as TNetworkRecordProvider,
-  ProgramManager as TProgramManager,
-  RecordScanner as TRecordScanner,
 } from "@provablehq/sdk/testnet.js";
 
-import { DEFAULT_ALEO_ENDPOINT, Network } from "./config.js";
+import { DEFAULT_ALEO_ENDPOINT } from "./config.js";
 import type { AleoWallet } from "./types.js";
 
 /** Options for {@link createAleoWallet}. Every value falls back to env vars. */
@@ -48,9 +40,6 @@ export interface AleoWalletOptions {
   /** Provable consumer id. Env: `PROVABLE_CONSUMER_ID` / `PROVER_CONSUMER_ID`. */
   consumerId?: string;
 }
-
-type AnyAccount = Account | TAccount;
-type AnyNetworkClient = AleoNetworkClient | TAleoNetworkClient;
 
 const programSourceCache = new Map<string, string>();
 
@@ -90,32 +79,21 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function getProgramManager(
   host: string,
-  account: AnyAccount,
-  networkClient: AnyNetworkClient,
-  network: Network,
-): ProgramManager | TProgramManager {
-  if (network === Network.MAINNET) {
-    const keyProvider = new AleoKeyProvider();
-    const recordProvider = new NetworkRecordProvider(
-      account as Account,
-      networkClient as AleoNetworkClient,
-    );
-    const pm = new ProgramManager(host, keyProvider, recordProvider);
-    pm.setAccount(account as Account);
-    return pm;
-  }
-  const keyProvider = new TAleoKeyProvider();
-  const recordProvider = new TNetworkRecordProvider(
-    account as TAccount,
-    networkClient as TAleoNetworkClient,
+  account: Account,
+  networkClient: AleoNetworkClient,
+): ProgramManager {
+  const keyProvider = new AleoKeyProvider();
+  const recordProvider = new NetworkRecordProvider(
+    account,
+    networkClient,
   );
-  const pm = new TProgramManager(host, keyProvider, recordProvider);
-  pm.setAccount(account as TAccount);
+  const pm = new ProgramManager(host, keyProvider, recordProvider);
+  pm.setAccount(account);
   return pm;
 }
 
 async function loadProgramSource(
-  networkClient: AnyNetworkClient,
+  networkClient: AleoNetworkClient,
   programId: string,
 ): Promise<string> {
   const cached = programSourceCache.get(programId);
@@ -148,10 +126,8 @@ async function loadProgramSource(
  */
 export async function createAleoWallet(
   privateKey: string | { to_string(): string },
-  network: Network = Network.TESTNET,
   options: AleoWalletOptions = {},
 ): Promise<AleoWallet> {
-  const isMainnet = network === Network.MAINNET;
 
   const host = options.host ?? process.env.ENDPOINT ?? DEFAULT_ALEO_ENDPOINT;
   const proverUri = options.proverUri ?? process.env.PROVER_URI ?? "https://api.provable.com/prove";
@@ -168,27 +144,21 @@ export async function createAleoWallet(
     throw new Error("Missing consumer id: pass options.consumerId or set PROVABLE_CONSUMER_ID");
   }
 
-  const networkClient: AnyNetworkClient = isMainnet
-    ? new AleoNetworkClient(host)
-    : new TAleoNetworkClient(host);
+  const networkClient: AleoNetworkClient = new AleoNetworkClient(host)
   networkClient.setProverUri(proverUri);
   networkClient.setRecordScannerUri(recordScannerUri);
 
   const keyString = typeof privateKey === "string" ? privateKey : privateKey.to_string();
-  const account: AnyAccount = isMainnet
-    ? new Account({ privateKey: keyString })
-    : new TAccount({ privateKey: keyString });
+  const account = new Account({ privateKey: keyString })
 
   // Lazily created on the first requestRecords call; the view key is
   // registered once and the resulting uuid reused for every scan.
-  let recordScanner: RecordScanner | TRecordScanner | undefined;
+  let recordScanner: RecordScanner | undefined;
   let scannerUuid: string | undefined;
 
   async function registeredScannerUuid(): Promise<string> {
     if (scannerUuid !== undefined) return scannerUuid;
-    recordScanner ??= isMainnet
-      ? new RecordScanner({ url: recordScannerUri })
-      : new TRecordScanner({ url: recordScannerUri });
+    recordScanner ??= new RecordScanner({ url: recordScannerUri })
     recordScanner.setApiKey(apiKey!);
     recordScanner.setConsumerId(consumerId!);
     const regResult = await recordScanner.registerEncrypted(account.viewKey(), 0);
@@ -223,7 +193,7 @@ export async function createAleoWallet(
     },
 
     executeTransaction: async (txOptions) => {
-      const programManager = getProgramManager(host, account, networkClient, network);
+      const programManager = getProgramManager(host, account, networkClient);
 
       const imports = new Set(txOptions.imports ?? []);
       imports.add(txOptions.program);
@@ -285,9 +255,7 @@ export async function createAleoWallet(
             // DPS 401 on /pubkey is often a sticky JWT/session. Drop the
             // cached token and use a fresh client.
             delete provingClient.jwtData;
-            provingClient = isMainnet
-              ? new AleoNetworkClient(host)
-              : new TAleoNetworkClient(host);
+            provingClient = new AleoNetworkClient(host)
             provingClient.setProverUri(proverUri);
             provingClient.setRecordScannerUri(recordScannerUri);
           }

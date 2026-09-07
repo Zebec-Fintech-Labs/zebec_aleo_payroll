@@ -4,7 +4,6 @@ import { setTimeout } from "node:timers/promises";
 import {
     configNameToField,
     createAleoWallet,
-    Network,
     StreamClient,
 } from "../sdk/index.js";
 
@@ -20,7 +19,7 @@ if (!PRIVATE_KEY) {
 }
 const HOST = process.env.ENDPOINT ?? "https://api.explorer.provable.com/v1";
 
-const wallet = await createAleoWallet(PRIVATE_KEY, Network.TESTNET, { host: HOST });
+const wallet = await createAleoWallet(PRIVATE_KEY, { host: HOST });
 const client = new StreamClient(wallet, { host: HOST });
 const admin = wallet.address;
 console.log("Admin address:", admin);
@@ -89,7 +88,7 @@ async function whitelistTokens() {
 
 async function main() {
     await initializeStreamConfig();
-    // await updateStreamConfig();
+    await updateStreamConfig();
     await whitelistTokens();
 }
 

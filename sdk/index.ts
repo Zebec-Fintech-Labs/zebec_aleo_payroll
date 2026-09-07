@@ -9,7 +9,6 @@ export {
 } from "./client.js";
 
 export {
-  Network,
   DEFAULT_ALEO_ENDPOINT,
   CREDITS_PROGRAM_ID,
   ZEBEC_STREAM_PROGRAM_ID,

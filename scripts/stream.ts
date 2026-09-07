@@ -35,7 +35,6 @@ import {
     configNameToField,
     createAleoWallet,
     fromMicroUnits,
-    Network,
     nowSeconds,
     StreamClient,
     signStreamTokenFee,
@@ -70,8 +69,8 @@ if (!RECEIVER_PRIVATE_KEY) {
 
 const HOST = process.env.ENDPOINT ?? "https://api.explorer.provable.com/v1";
 
-const senderWallet = await createAleoWallet(SENDER_PRIVATE_KEY, Network.TESTNET, { host: HOST });
-const receiverWallet = await createAleoWallet(RECEIVER_PRIVATE_KEY, Network.TESTNET, { host: HOST });
+const senderWallet = await createAleoWallet(SENDER_PRIVATE_KEY, { host: HOST });
+const receiverWallet = await createAleoWallet(RECEIVER_PRIVATE_KEY, { host: HOST });
 const senderClient = new StreamClient(senderWallet, { host: HOST });
 const receiverClient = new StreamClient(receiverWallet, { host: HOST });
 const sender = senderWallet.address;

@@ -4,12 +4,6 @@
  * compliant stablecoins (needed to build IARC22 exclusion proofs).
  */
 
-/** Aleo network the service talks to. */
-export enum Network {
-  TESTNET = "testnet",
-  MAINNET = "mainnet",
-}
-
 /** Default explorer API endpoint (testnet). */
 export const DEFAULT_ALEO_ENDPOINT = "https://api.explorer.provable.com/v1";
 
@@ -17,10 +11,7 @@ export const DEFAULT_ALEO_ENDPOINT = "https://api.explorer.provable.com/v1";
 export const CREDITS_PROGRAM_ID = "credits.aleo";
 
 /** Deployed Zebec stream program id per network. */
-export const ZEBEC_STREAM_PROGRAM_ID: Record<Network, string | undefined> = {
-  [Network.TESTNET]: "test_zebec_stream_v3.aleo",
-  [Network.MAINNET]: undefined,
-};
+export const ZEBEC_STREAM_PROGRAM_ID = "test_zebec_stream_v3.aleo";
 
 export interface StablecoinNetworkConfig {
   /**
@@ -35,8 +26,8 @@ export interface StablecoinNetworkConfig {
 }
 
 /** Per-network configuration of the supported compliant stablecoins. */
-export const STABLE_COINS_CONFIGS: Partial<Record<Network, StablecoinNetworkConfig>> = {
-  [Network.TESTNET]: {
+export const STABLE_COINS_CONFIGS = {
+  default: {
     freezeListApi: {
       usad: "https://api.explorer.provable.com/v2/testnet/programs/test_usad_freezelist.aleo/compliance/freeze-list",
       usdcx: "https://api.explorer.provable.com/v2/testnet/programs/test_usdcx_freezelist.aleo/compliance/freeze-list",
