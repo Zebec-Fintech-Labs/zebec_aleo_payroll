@@ -54,7 +54,6 @@ import {
   fromMicroUnits,
   i64Literal,
   isWithdrawFrequencyValid,
-  Network,
   nowSeconds,
   signStreamTokenFee,
   streamAnchorToPlaintext,
@@ -67,7 +66,7 @@ import {
   type RawStreamAnchor,
   type RawStreamTokenFee,
   type StreamTokenFee,
-} from "../../sdk/index.js";
+} from "../sdk/index.js";
 
 dotenv.config();
 
@@ -85,7 +84,7 @@ const HOST = process.env.ENDPOINT ?? DEFAULT_ENDPOINT;
 const SETTLE_MS = Number(process.env.ONCHAIN_SETTLE_MS ?? 60_000);
 
 /** Per-test budget: several sequential writes, each followed by a settle. */
-const TEST_TIMEOUT_MS = 900_000;
+const TEST_TIMEOUT_MS = 6_000_000;
 
 const TOKEN_PROGRAM = "test_usdcx_stablecoin"; // testnet USDCx token program ID
 const TOKEN_DECIMALS = 6;
@@ -148,9 +147,9 @@ describe("testnet integration: stream lifecycle", function () {
   let publicAutoId: string;
 
   before(async () => {
-    const adminWallet = await createAleoWallet(adminKey, Network.TESTNET, { host: HOST });
-    const senderWallet = await createAleoWallet(senderKey, Network.TESTNET, { host: HOST });
-    const receiverWallet = await createAleoWallet(receiverKey, Network.TESTNET, { host: HOST });
+    const adminWallet = await createAleoWallet(adminKey, { host: HOST });
+    const senderWallet = await createAleoWallet(senderKey, { host: HOST });
+    const receiverWallet = await createAleoWallet(receiverKey, { host: HOST });
     adminClient = new StreamClient(adminWallet, { host: HOST });
     senderClient = new StreamClient(senderWallet, { host: HOST });
     receiverClient = new StreamClient(receiverWallet, { host: HOST });
@@ -317,7 +316,7 @@ describe("testnet integration: stream lifecycle", function () {
       const anchor = await senderClient.getStreamAnchor(streamId);
       assert.equal(anchor.canceled, false);
       assert.equal(anchor.isPublic, false);
-      assert.equal(anchor.depositedAmount, "2");
+      assert.equal(anchor.depositedAmount, toMicroUnits("2", TOKEN_DECIMALS));
     });
 
     it("pauses and resumes", async () => {
@@ -330,15 +329,15 @@ describe("testnet integration: stream lifecycle", function () {
       await confirmWrite(resumeTx);
       anchor = await senderClient.getStreamAnchor(streamId);
       assert.equal(anchor.paused, false);
-      assert.ok(anchor.pausedInterval > 0);
+      assert.ok(anchor.pausedInterval > 0n);
     });
 
     it("withdraws a partial amount", async () => {
       const txId = await receiverClient.withdrawStreamPrivate({ streamId }, { priorityFee: PRIORITY_FEE });
       await confirmWrite(txId);
       const anchor = await receiverClient.getStreamAnchor(streamId);
-      assert.ok(Number(anchor.withdrawnAmount) > 0);
-      assert.ok(Number(anchor.withdrawnAmount) < 2);
+      assert.ok(Number(anchor.withdrawnAmount) > microAmount(0));
+      assert.ok(Number(anchor.withdrawnAmount) < microAmount("2"));
     });
 
     it("cancels the stream", async () => {
@@ -368,7 +367,7 @@ describe("testnet integration: stream lifecycle", function () {
       );
       await confirmWrite(txId);
       const anchor = await senderClient.getStreamAnchor(streamId);
-      assert.equal(anchor.depositedAmount, "1");
+      assert.equal(anchor.depositedAmount, microAmount("1"));
     });
 
     it("tops up the buffer", async () => {
@@ -378,7 +377,7 @@ describe("testnet integration: stream lifecycle", function () {
       );
       await confirmWrite(txId);
       const anchor = await senderClient.getStreamAnchor(streamId);
-      assert.equal(anchor.depositedAmount, "1.5");
+      assert.equal(anchor.depositedAmount, microAmount("1.5"));
     });
   });
 
@@ -415,7 +414,7 @@ describe("testnet integration: stream lifecycle", function () {
       );
       await confirmWrite(txId);
       const anchor = await adminClient.getStreamAnchor(streamId);
-      assert.ok(Number(anchor.withdrawnAmount) > 0);
+      assert.ok(Number(anchor.withdrawnAmount) > microAmount(0));
     });
   });
 
@@ -458,15 +457,15 @@ describe("testnet integration: stream lifecycle", function () {
       await confirmWrite(resumeTx);
       anchor = await senderClient.getStreamAnchor(publicBasicId);
       assert.equal(anchor.paused, false);
-      assert.ok(anchor.pausedInterval > 0);
+      assert.ok(anchor.pausedInterval > 0n);
     });
 
     it("withdraws a partial amount", async () => {
       const txId = await receiverClient.withdrawStreamPublic({ streamId: publicBasicId }, { priorityFee: PRIORITY_FEE });
       await confirmWrite(txId);
       const anchor = await receiverClient.getStreamAnchor(publicBasicId);
-      assert.ok(Number(anchor.withdrawnAmount) > 0);
-      assert.ok(Number(anchor.withdrawnAmount) < 2);
+      assert.ok(Number(anchor.withdrawnAmount) > microAmount("0"));
+      assert.ok(Number(anchor.withdrawnAmount) < microAmount("2"));
     });
 
     it("cancels the stream", async () => {
@@ -500,7 +499,7 @@ describe("testnet integration: stream lifecycle", function () {
       );
       await confirmWrite(txId);
       const anchor = await senderClient.getStreamAnchor(publicBufferId);
-      assert.equal(anchor.depositedAmount, "1");
+      assert.equal(anchor.depositedAmount, microAmount("1"));
     });
 
     it("tops up the buffer", async () => {
@@ -510,7 +509,7 @@ describe("testnet integration: stream lifecycle", function () {
       );
       await confirmWrite(txId);
       const anchor = await senderClient.getStreamAnchor(publicBufferId);
-      assert.equal(anchor.depositedAmount, "1.5");
+      assert.equal(anchor.depositedAmount, microAmount("1.5"));
     });
   });
 
@@ -939,7 +938,7 @@ describe("testnet integration: stream lifecycle", function () {
         );
         await confirmWrite(txId);
         const anchor = await senderClient.getStreamAnchor(fundedLateId);
-        assert.equal(anchor.depositedAmount, "2");
+        assert.equal(anchor.depositedAmount, microAmount("2"));
       });
 
       it("rejects a further top-up once fully funded", async () => {
@@ -957,7 +956,7 @@ describe("testnet integration: stream lifecycle", function () {
         const txId = await receiverClient.withdrawStreamPublic({ streamId: fundedLateId }, { priorityFee: PRIORITY_FEE });
         await confirmWrite(txId);
         const anchor = await receiverClient.getStreamAnchor(fundedLateId);
-        assert.equal(anchor.withdrawnAmount, "2");
+        assert.equal(anchor.withdrawnAmount, microAmount("2"));
       });
 
       it("rejects a further withdraw once fully withdrawn", async () => {
@@ -1000,8 +999,8 @@ describe("testnet integration: stream lifecycle", function () {
         const txId = await receiverClient.withdrawStreamPublic({ streamId: underfundedId }, { priorityFee: PRIORITY_FEE });
         await confirmWrite(txId);
         const anchor = await receiverClient.getStreamAnchor(underfundedId);
-        assert.equal(anchor.withdrawnAmount, "1");
-        assert.equal(anchor.depositedAmount, "1");
+        assert.equal(anchor.withdrawnAmount, microAmount("1"));
+        assert.equal(anchor.depositedAmount, microAmount("1"));
       });
 
       it("rejects a further withdraw once the funded buffer is exhausted", async () => {

@@ -8,7 +8,7 @@ import {
   streamRefKey,
   streamTokenFeeMessage,
   whitelistKey,
-} from "../../sdk/hashing.js";
+} from "../sdk/hashing.js";
 
 // Known vector produced on-chain with `leo run` (Leo 4.4.1, testnet) against
 // the StreamTokenFee struct:

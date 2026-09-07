@@ -28,8 +28,8 @@ import {
   streamTokenFeeToPlaintext,
   stripVisibilitySuffix,
   u64Literal,
-} from "../../sdk/plaintext.js";
-import type { RawStream, RawStreamAnchor } from "../../sdk/types.js";
+} from "../sdk/plaintext.js";
+import type { RawStream, RawStreamAnchor } from "../sdk/types.js";
 
 const RECEIVER = "aleo1ezamst4pjgj9zfxqq0fwfj8a4cjuqndmasgata3hggzqygggnyfq6kmyd4";
 const ADMIN = "aleo129nrpl0dxh4evdsan3f4lyhz5pdgp6klrn5atp37ejlavswx5czsk0j5dj";

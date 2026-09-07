@@ -17,7 +17,7 @@ import {
   fromMicroUnits,
   getDecimalsByTokenProgram,
   toMicroUnits,
-} from "../../sdk/utils.js";
+} from "../sdk/utils.js";
 
 describe("toMicroUnits", () => {
   it("scales whole and fractional amounts at the default 6 decimals", () => {

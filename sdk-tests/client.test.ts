@@ -1,9 +1,8 @@
 import assert from "node:assert";
 import { describe, it } from "mocha";
 
-import { StreamService as StreamClient, PROGRAM_ID } from "../../sdk/client.js";
-import { Network } from "../../sdk/config.js";
-import type { AleoWallet, TransactionOptions } from "../../sdk/types.js";
+import { StreamService as StreamClient, PROGRAM_ID } from "../sdk/client.js";
+import type { AleoWallet, TransactionOptions } from "../sdk/types.js";
 
 const WALLET_ADDRESS = "aleo1ezamst4pjgj9zfxqq0fwfj8a4cjuqndmasgata3hggzqygggnyfq6kmyd4";
 const OTHER_ADDRESS = "aleo129nrpl0dxh4evdsan3f4lyhz5pdgp6klrn5atp37ejlavswx5czsk0j5dj";
@@ -94,14 +93,6 @@ describe("StreamClient — construction", () => {
     const client = new StreamClient(makeWallet({}));
     assert.equal(client.address, WALLET_ADDRESS);
     assert.equal(client.programId, PROGRAM_ID);
-    assert.equal(client.network, Network.TESTNET);
-  });
-
-  it("requires an explicit programId on networks without a default", () => {
-    assert.throws(
-      () => new StreamClient(makeWallet({}), { network: Network.MAINNET }),
-      /no default stream program id/,
-    );
   });
 });
 

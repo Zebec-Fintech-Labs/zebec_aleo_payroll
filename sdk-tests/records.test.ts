@@ -8,7 +8,7 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "mocha";
 
-import { matchesTicketRecord, recordAmount } from "../../sdk/records.js";
+import { matchesTicketRecord, recordAmount } from "../sdk/records.js";
 
 const OWNER = "aleo1ezamst4pjgj9zfxqq0fwfj8a4cjuqndmasgata3hggzqygggnyfq6kmyd4";
 

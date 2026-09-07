@@ -10,7 +10,7 @@ import {
   isWithdrawFrequencyValid,
   nowSeconds,
   WITHDRAW_FREQUENCIES,
-} from "../../sdk/math.js";
+} from "../sdk/math.js";
 
 const ONE_USD = 1_000_000n; // $1.00 at 6 price decimals
 

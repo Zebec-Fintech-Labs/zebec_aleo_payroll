@@ -2,8 +2,8 @@ import assert from "node:assert";
 import { Account } from "@provablehq/sdk";
 import { describe, it } from "mocha";
 
-import { signStreamTokenFee, verifyStreamTokenFeeSignature } from "../../sdk/signing.js";
-import type { RawStreamTokenFee } from "../../sdk/types.js";
+import { signStreamTokenFee, verifyStreamTokenFeeSignature } from "../sdk/signing.js";
+import type { RawStreamTokenFee } from "../sdk/types.js";
 
 // Well-known Leo CLI default private key (public, used for tests only).
 const TEST_PRIVATE_KEY =
