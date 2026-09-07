@@ -151,23 +151,6 @@ export async function createAleoWallet(
   const keyString = typeof privateKey === "string" ? privateKey : privateKey.to_string();
   const account = new Account({ privateKey: keyString })
 
-  // Lazily created on the first requestRecords call; the view key is
-  // registered once and the resulting uuid reused for every scan.
-  let recordScanner: RecordScanner | undefined;
-
-  async function registeredScannerUuid(): Promise<string> {
-    recordScanner ??= new RecordScanner({ url: recordScannerUri })
-    recordScanner.setApiKey(apiKey!);
-    recordScanner.setConsumerId(consumerId!);
-    const regResult = await recordScanner.registerEncrypted(account.viewKey(), 0);
-    if (!regResult.ok) {
-      throw new Error(
-        regResult.error?.message ?? `Record scanner registration failed: ${regResult.status}`,
-      );
-    }
-    return regResult.data.uuid;
-  }
-
   const wallet: AleoWallet = {
     address: account.address().to_string(),
 
@@ -176,9 +159,17 @@ export async function createAleoWallet(
     },
 
     requestRecords: async (program, includePlaintext) => {
-      const uuid = await registeredScannerUuid();
-      const records = await recordScanner!.findRecords({
-        uuid,
+      const recordScanner = new RecordScanner({ url: recordScannerUri });
+      recordScanner.setApiKey(apiKey!);
+      recordScanner.setConsumerId(consumerId!);
+      const regResult = await recordScanner.registerEncrypted(account.viewKey(), 0);
+      if (!regResult.ok) {
+        throw new Error(
+          regResult.error?.message ?? `Record scanner registration failed: ${regResult.status}`,
+        );
+      }
+      const records = await recordScanner.findRecords({
+        uuid: regResult.data.uuid,
         unspent: true,
         filter: { programs: [program] },
       });
