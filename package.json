@@ -31,7 +31,7 @@
     "clean": "leo clean",
     "run:admin": "tsx scripts/admin.ts",
     "run:deploy": "tsx scripts/deploy.ts",
-    "run:payroll": "tsx scripts/payroll.ts",
+    "run:stream": "tsx scripts/stream.ts",
     "run:upgrade": "tsx scripts/upgrade.ts",
     "sdk:build": "npm run sdk:clean && tsc -p tsconfig.json",
     "sdk:clean": "rimraf dist .test-dist",
