@@ -7,7 +7,7 @@
       "path": null
     }
   ],
-  "description": "",
+  "description": "A arc22 token streaming program in aleo chain",
   "dev_dependencies": null,
   "leo": "4.4.1",
   "license": "MIT",
