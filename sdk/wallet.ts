@@ -144,7 +144,7 @@ export async function createAleoWallet(
     throw new Error("Missing consumer id: pass options.consumerId or set PROVABLE_CONSUMER_ID");
   }
 
-  const networkClient: AleoNetworkClient = new AleoNetworkClient(host)
+  const networkClient = new AleoNetworkClient(host)
   networkClient.setProverUri(proverUri);
   networkClient.setRecordScannerUri(recordScannerUri);
 
@@ -154,10 +154,8 @@ export async function createAleoWallet(
   // Lazily created on the first requestRecords call; the view key is
   // registered once and the resulting uuid reused for every scan.
   let recordScanner: RecordScanner | undefined;
-  let scannerUuid: string | undefined;
 
   async function registeredScannerUuid(): Promise<string> {
-    if (scannerUuid !== undefined) return scannerUuid;
     recordScanner ??= new RecordScanner({ url: recordScannerUri })
     recordScanner.setApiKey(apiKey!);
     recordScanner.setConsumerId(consumerId!);
@@ -167,8 +165,7 @@ export async function createAleoWallet(
         regResult.error?.message ?? `Record scanner registration failed: ${regResult.status}`,
       );
     }
-    scannerUuid = regResult.data.uuid;
-    return scannerUuid;
+    return regResult.data.uuid;
   }
 
   const wallet: AleoWallet = {
