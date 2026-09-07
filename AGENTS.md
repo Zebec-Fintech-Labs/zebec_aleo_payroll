@@ -113,8 +113,8 @@ Read contents from these links (Cloudflare bot check possible — bypass as need
 
 <!-- END leo-docs -->
 
-<!-- BEGIN: Zebec Payroll Docs -->
-## 3. Payroll requirements
+<!-- BEGIN: Zebec Stream Docs -->
+## 3. Stream requirements
 
 Linear vesting: `vested(t) = amount * (t - start) / (end - start)`, capped at the total. Employees withdraw accrued funds any time; cancel returns the unvested remainder to the employer.
 
@@ -164,7 +164,7 @@ Costs: storage (tx bytes), finalize (mapping ops), proof synthesis (per tx). Min
 - Leo test framework: `@test` / `@should_fail` run against the real VM including finalize. Cover every entry function, boundary values, unauthorized access, double spend, and expected failures.
 - Public audits: Trail of Bits snarkVM/snarkOS reviews (2022, 2023); Aleo Immunefi bug bounty.
 
-<!-- END: Zebec Payroll Docs -->
+<!-- END: Zebec Stream Docs -->
 <!-- BEGIN: Browser app -->
 ## 6. Browser app (`app/`)
 
@@ -174,7 +174,7 @@ Costs: storage (tx bytes), finalize (mapping ops), proof synthesis (per tx). Min
 
 - Commands: `cd app && yarn install`, `yarn dev`, `yarn build` (`tsc && vite
   build`), `yarn preview`.
-- Architecture: `app/src/payroll/WalletPayrollService.ts` is the wallet-backed
+- Architecture: `app/src/stream/WalletStreamService.ts` is the wallet-backed
   counterpart of `sdk/client.ts`'s `StreamService` — transactions go through
   the wallet's `executeTransaction` / `executeDeployment` (never
   ProgramManager), mapping reads through `AleoNetworkClient`. It imports the
@@ -197,7 +197,7 @@ Costs: storage (tx bytes), finalize (mapping ops), proof synthesis (per tx). Min
 - Records-via-wallet pattern: `requestRecords(program, false)` → keep
   `spent === false` → `wallet.decrypt(recordCiphertext)` → single-line
   plaintext → pick highest `microcredits:`/`amount:` record covering the
-  needed amount; payroll tickets are identified by their `ticket_type` member
+  needed amount; stream tickets are identified by their `ticket_type` member
   (0 = sender, 1 = receiver, 2 = withdrawer; ported `matchesTicket` logic).
 - The only private key in the app is the admin attestation key input on the
   Employer page, used solely for `signStreamTokenFee` (never persisted).
@@ -220,13 +220,13 @@ finalize_create_stream(params, config, token_fee, fee_signature, token_program,
 deposit_amount, signer, is_public)`. This helper:
 
 1. Re-validates all stream parameters at the block level.
-2. Fetches and verifies the `payroll_configs` entry (`assert_config_fields`).
+2. Fetches and verifies the `stream_configs` entry (`assert_config_fields`).
 3. Checks and consumes the `token_fee_nonces` entry (replay prevention).
 4. Verifies `assert_token_fee_binding` and the Schnorr signature.
 5. Checks the token whitelist and stream-id freshness.
 6. Constructs and writes the `StreamAnchor` (with `is_public` from the flag).
-7. When `is_public == true`: also checks `payrolls` freshness and writes the
-   `Payroll` mapping entry.
+7. When `is_public == true`: also checks `streams` freshness and writes the
+   `Stream` mapping entry.
 
 Each entry's `final {}` block calls the helper first, then runs its own
 `.run()` calls (CEI order: checks/effects in helper, interactions after).
