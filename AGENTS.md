@@ -212,34 +212,56 @@ Costs: storage (tx bytes), finalize (mapping ops), proof synthesis (per tx). Min
 <!-- BEGIN: Program architecture notes -->
 ## 7. Program architecture notes (current as of Leo 4.4.1 refactor)
 
-### Shared finalize logic (`final fn finalize_create_stream`)
+### Finalize logic for `create_stream_private` / `create_stream_public`
 
-`create_stream_public` and `create_stream_private` share their on-chain
-verification and state-write logic via a top-level `final fn
-finalize_create_stream(params, config, token_fee, fee_signature, token_program,
-deposit_amount, signer, is_public)`. This helper:
+There is **no shared `finalize_create_stream` helper**. `create_stream_private`'s and
+`create_stream_public`'s own `final {}` blocks each inline the full checklist
+below independently; the two are kept manually in sync rather than sharing
+code. (A prior refactor apparently introduced a shared helper and this
+section originally documented it; it was since inlined back into both
+entries without this doc catching up — treat the checklist below as the
+current source of truth over any other in-repo description.)
 
-1. Re-validates all stream parameters at the block level.
-2. Fetches and verifies the `stream_configs` entry (`assert_config_fields`).
-3. Checks and consumes the `token_fee_nonces` entry (replay prevention).
-4. Verifies `assert_token_fee_binding` and the Schnorr signature.
-5. Checks the token whitelist and stream-id freshness.
-6. Constructs and writes the `StreamAnchor` (with `is_public` from the flag).
-7. When `is_public == true`: also checks `streams` freshness and writes the
-   `Stream` mapping entry.
+Both finals do the following, in order:
 
-Each entry's `final {}` block calls the helper first, then runs its own
-`.run()` calls (CEI order: checks/effects in helper, interactions after).
+1. Assert `start_now || start_time >= now` against the real on-chain block
+   timestamp (`std::ctx::block_timestamp()`).
+2. Fetch and verify the `stream_configs` entry against the caller-supplied
+   `Config` (`assert_config_fields`).
+3. Check the `token_fee_nonces` entry is unused, then consume it
+   (`token_fee_nonces.set(nonce, true)`) — replay prevention.
+4. Run `assert_token_fee_binding` (expiry / config / token-program binding)
+   and verify the Schnorr signature (`std::sig::verify_schnorr` against
+   `config.admin`, over `BHP256::hash_to_field(token_fee)`).
+5. Check the token whitelist (`whitelisted_token_programs`, scoped to
+   `config.config_name` + `token_program`).
+6. Assert the stream id is fresh (`!stream_anchors.contains(stream_id)`),
+   then construct and write the `StreamAnchor` — `is_public` is a literal
+   (`false` in `create_stream_private`, `true` in `create_stream_public`),
+   not a passed flag.
+7. `create_stream_public` additionally: asserts `!streams.contains(stream_id)`,
+   writes the `Stream` mapping entry, and appends the sender's/receiver's
+   per-config registry entries (`outgoing_stream_counts`/`outgoing_stream_refs`,
+   `incoming_stream_counts`/`incoming_stream_refs`).
+8. Runs the `Final` futures built earlier in the transition body (CEI order:
+   checks/effects above, `.run()` interactions last). `create_stream_private`
+   runs the fee-transfer and deposit-transfer futures (both private-path
+   IARC22 calls); `create_stream_public` additionally runs an
+   auto-withdrawal-fee-transfer future (`credits.aleo::transfer_public_as_signer`
+   — public credits, so it has no private-path equivalent) alongside its own
+   fee/deposit-transfer futures (`IARC22::transfer_from_public`).
 
-**New entry functions must follow this pattern.** When adding a `create_*`
-variant (e.g. a native-credits path in a future phase), call
-`finalize_create_stream` from its `final {}` block rather than duplicating the
-verification logic inline.
+**New `create_*` variants must replicate this checklist inline** in their own
+`final {}` block (e.g. a native-credits path in a future phase) — there is
+currently nothing to call. If a third variant is added, extracting a real
+shared `final fn` at that point (rather than a third copy) is worth
+revisiting.
 
 ### `assert_create_params` helper
 
 Both create transitions call the top-level `fn assert_create_params(params)`
 before any sub-calls. This helper enforces:
+
 - `duration > 0` and `amount > 0` in the proof context (early exit before
   proving expensive sub-calls).
 - `duration as u128 <= I64_MAX` — bounds `buffer_secs ≤ duration`, preventing
@@ -250,8 +272,9 @@ before any sub-calls. This helper enforces:
 
 The admin signs a `StreamTokenFee { config, stream_token, stream_fee_amount:
 u128, expiry: i64, nonce: field }` struct. The on-chain program verifies the
-Schnorr signature against `BHP256::hash_to_field(token_fee)` inside
-`finalize_create_stream`. The SDK mirrors this via `streamTokenFeeToPlaintext`
+Schnorr signature against `BHP256::hash_to_field(token_fee)` inside each
+create entry's own `final {}` block (see §7's finalize checklist above —
+there is no shared helper). The SDK mirrors this via `streamTokenFeeToPlaintext`
 (member order must match the Leo struct declaration exactly) and
 `signStreamTokenFee` / `streamTokenFeeMessage`. **Do not add, remove, or
 reorder fields without updating the SDK and regenerating test vectors.**
