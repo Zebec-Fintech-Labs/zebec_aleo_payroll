@@ -34,9 +34,9 @@
     "run:stream": "tsx scripts/stream.ts",
     "run:upgrade": "tsx scripts/upgrade.ts",
     "sdk:build": "npm run sdk:clean && tsc -p tsconfig.json",
-    "sdk:clean": "rimraf dist .test-dist",
+    "sdk:clean": "rimraf dist",
     "sdk:test": "mocha --spec 'sdk-tests/**/*.test.ts'",
-    "test": "mocha --spec '.tests/**/*.test.ts'"
+    "test": "mocha --spec 'tests/**/*.test.ts'"
   },
   "type": "module",
   "types": "dist/index.d.ts",
