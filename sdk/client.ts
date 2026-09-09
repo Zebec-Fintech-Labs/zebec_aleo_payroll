@@ -1,6 +1,6 @@
 /**
  * `StreamService` — high-level interface to the Zebec stream program
- * (`test_zebec_stream_v3.aleo`): stream lifecycle, admin configuration,
+ * (`zebec_stream_v1.aleo`): stream lifecycle, admin configuration,
  * mapping reads, and record discovery.
  *
  * The service is **wallet-only**: every transaction goes through
