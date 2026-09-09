@@ -1,10 +1,20 @@
-import { Account, AleoKeyProvider, initThreadPool, ProgramManager } from "@provablehq/sdk/testnet.js";
 import dotenv from "dotenv";
 import path from "node:path";
 import * as fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
 dotenv.config();
+
+const NETWORK = (process.env.NETWORK ?? "testnet").trim().toLowerCase();
+if (NETWORK !== "mainnet" && NETWORK !== "testnet") {
+    console.error(`Unsupported NETWORK="${NETWORK}". Set NETWORK=mainnet or NETWORK=testnet.`);
+    process.exit(1);
+}
+
+const { Account, AleoKeyProvider, initThreadPool, ProgramManager } =
+    NETWORK === "mainnet"
+        ? await import("@provablehq/sdk/mainnet.js")
+        : await import("@provablehq/sdk/testnet.js");
 
 await initThreadPool();
 
@@ -14,7 +24,12 @@ if (!PRIVATE_KEY) {
     console.error("PRIVATE_KEY environment variable is not set.");
     process.exit(1);
 }
-const HOST = "https://api.explorer.provable.com/v2";
+const HOST = process.env.ENDPOINT ?? "https://api.provable.com/v2";
+const CONFIRM_POLL_MS = 2_000;
+const CONFIRM_TIMEOUT_MS = 600_000;
+const EXPLORER =
+    NETWORK === "mainnet" ? "https://explorer.provable.com" : "https://testnet.explorer.provable.com";
+console.log("Network:", NETWORK);
 console.log("Host:", HOST);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PROGRAM_SOURCE = fs.readFileSync(
@@ -24,6 +39,8 @@ const PROGRAM_SOURCE = fs.readFileSync(
 // console.log("Program source loaded:\n", PROGRAM_SOURCE, "\n");
 
 const account = new Account({ privateKey: PRIVATE_KEY });
+const deployer = account.address().to_string();
+console.log("Deployer:", deployer);
 
 // Create a network client to connect to the Aleo network.
 // const networkClient = new AleoNetworkClient(HOST);
@@ -36,36 +53,67 @@ const programManager = new ProgramManager(HOST, keyProvider);
 programManager.setAccount(account);
 // const imports = await networkClient.getProgramImports(PROGRAM_SOURCE);
 // console.log("Program imports:", imports);
+
+const publicBalance = await programManager.networkClient.getPublicBalance(deployer);
+console.log("Public credits balance (microcredits):", publicBalance);
+if (!publicBalance) {
+    const fundHint =
+        NETWORK === "mainnet"
+            ? `Send public ALEO to this address on mainnet, wait until the explorer shows a non-zero public balance, then rerun.`
+            : `Request testnet credits for this address at https://faucet.aleo.org/ (the faucet pays public credits), wait until the explorer shows a non-zero public balance, then rerun.`;
+    console.error(
+        `Deployer ${deployer} has no public credits.aleo balance on ${NETWORK}, so a public-fee deployment cannot be broadcast.\n` +
+        `${fundHint}\n` +
+        `Explorer: ${EXPLORER}/address/${deployer}`,
+    );
+    process.exit(1);
+}
+
 // Define a fee to pay to deploy the program
 const fee = 2;
 // Build a deployment transaction for the program.
 const tx = await programManager.buildDeploymentTransaction(PROGRAM_SOURCE, fee, false);
-console.log("Transaction ID:", tx.id());
-// Send the transaction to the network until it is confirmed.
-let confirmed = false;
-let transaction_id = tx.id();
-const submitTransactionWithRetry = async () => {
-    while (!confirmed) {
+const transactionId = tx.id();
+console.log("Built deployment transaction:", transactionId);
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function submitDeployment(): Promise<string> {
+    while (true) {
         try {
-            transaction_id = await programManager.networkClient.submitTransaction(tx);
-            console.log("Transaction ID:", transaction_id);
-            await new Promise(resolve => setTimeout(resolve, 5000));
+            const submittedId = await programManager.networkClient.submitTransaction(tx);
+            console.log("Submitted transaction:", submittedId);
+            return submittedId;
         } catch (error) {
-            if (error instanceof Error && error.message.includes(`Transaction '${transaction_id}' already exists in the ledger`)) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (message.includes(`Transaction '${transactionId}' already exists in the ledger`)) {
                 console.log("Transaction already exists in the ledger.");
-                break;
+                return transactionId;
             }
+            if (
+                message.includes("payer account balance is missing") ||
+                message.includes("insufficient balance")
+            ) {
+                throw new Error(
+                    `Public fee rejected on ${NETWORK}: ${message}\n` +
+                    `Fund ${deployer} with public ${NETWORK} credits and rerun.`,
+                );
+            }
+            console.error("Submit failed, retrying in 5s:", message);
+            await sleep(5_000);
         }
     }
 }
 
-const waitForConfirmation = async () => {
-    const transactionStatus = await programManager.networkClient.waitForTransactionConfirmation(transaction_id);
-    console.log("Transaction Status:", transactionStatus.status);
-    if (transactionStatus.status.toLowerCase() === "accepted") {
-        confirmed = true;
-        console.log("Transaction confirmed successfully.");
-    }
+const submittedId = await submitDeployment();
+console.log(`Waiting for confirmation (up to ${CONFIRM_TIMEOUT_MS / 1000}s). 404s while polling are expected until the tx is included.`);
+const transactionStatus = await programManager.networkClient.waitForTransactionConfirmation(
+    submittedId,
+    CONFIRM_POLL_MS,
+    CONFIRM_TIMEOUT_MS,
+);
+console.log("Transaction Status:", transactionStatus.status);
+if (transactionStatus.status.toLowerCase() !== "accepted") {
+    throw new Error(`Deployment was not accepted: ${transactionStatus.status}`);
 }
-
-await Promise.all([submitTransactionWithRetry(), waitForConfirmation()]);
+console.log("Transaction confirmed successfully.");
