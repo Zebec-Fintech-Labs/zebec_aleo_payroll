@@ -245,6 +245,7 @@ export class StreamService {
       config: tokenFee.config,
       streamToken: tokenFee.streamToken,
       streamFeeAmount: BigInt(toMicroUnits(tokenFee.streamFeeAmount, tokenDecimals)),
+      streamAmount: BigInt(toMicroUnits(tokenFee.streamAmount, tokenDecimals)),
       expiry: BigInt(tokenFee.expiry),
       nonce: tokenFee.nonce,
     };
