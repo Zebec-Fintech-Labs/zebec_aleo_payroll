@@ -32,10 +32,14 @@ const EXPLORER =
 console.log("Network:", NETWORK);
 console.log("Host:", HOST);
 const here = path.dirname(fileURLToPath(import.meta.url));
+const PROGRAM_ID = JSON.parse(
+    fs.readFileSync(path.resolve(here, "../program.json"), "utf8"),
+)["program"] as string;
 const PROGRAM_SOURCE = fs.readFileSync(
-    path.resolve(here, "../build/zebec_stream_v1/zebec_stream_v1.aleo"),
+    path.resolve(here, `../build/${PROGRAM_ID}/${PROGRAM_ID}.aleo`),
     "utf8",
 );
+console.log("Program id:", PROGRAM_ID);
 // console.log("Program source loaded:\n", PROGRAM_SOURCE, "\n");
 
 const account = new Account({ privateKey: PRIVATE_KEY });

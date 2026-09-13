@@ -1,5 +1,5 @@
 /**
- * TypeScript mirrors of the Leo structs in `zebec_stream_v1.aleo` (see
+ * TypeScript mirrors of the Leo structs in `test_zebec_stream_v4.aleo` (see
  * `src/main.leo` at the repository root) plus SDK option types.
  *
  * Two layers of types:
@@ -21,8 +21,6 @@
  *   strings without quotes (`"my_token_program"`).
  * - Aleo addresses are `aleo1...` strings.
  */
-
-import type { Network } from "./config.js";
 
 // ===========================================================================
 // Raw (on-chain) types — bigint micro-units, bigint seconds
@@ -438,10 +436,8 @@ export interface StreamServiceOptions {
   /** API host. Defaults to the testnet explorer API. */
   host?: string;
   /**
-   * Program id. Defaults to the deployed program for `network`
-   * (`zebec_stream_v1.aleo` on testnet).
+   * Program id. Defaults to the deployed program —
+   * `test_zebec_stream_v4.aleo` on testnet.
    */
   programId?: string;
-  /** Network the service talks to. Defaults to `Network.TESTNET`. */
-  network?: Network;
 }
