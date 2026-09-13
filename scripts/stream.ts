@@ -138,12 +138,14 @@ function createSignedTokenFee(streamAmountMicro: bigint): {
         config: CONFIG_NAME,
         streamToken: TOKEN_PROGRAM,
         streamFeeAmount: streamFee,
+        streamAmount: streamAmountMicro,
         expiry: nowSeconds() + 3600n,
         nonce: randomField(),
     };
     const tokenFee: StreamTokenFee = {
         ...rawFee,
         streamFeeAmount: fromMicroUnits(streamFee, TOKEN_DECIMALS),
+        streamAmount: fromMicroUnits(streamAmountMicro, TOKEN_DECIMALS),
     };
     return { tokenFee, signature: signStreamTokenFee(ADMIN_PRIVATE_KEY!, rawFee) };
 }
