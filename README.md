@@ -32,7 +32,7 @@ The on-chain program — `zebec_stream_v1.aleo`, written in [Leo](https://docs.l
 - **Top-up (buffer funding)** — a stream can start with a partial deposit (`initial_buffer_amount`) and be topped up later; payouts are capped at the funded amount so nothing can be withdrawn ahead of funding.
 - **Delegated auto-withdrawal** — an optional third party (the config's `withdrawer`) can trigger withdrawals on the receiver's behalf on a fixed schedule, for a small fee, without ever holding the receiver's or sender's tickets/records.
 - **Multi-tenant configuration** — the same deployed program supports many independent `StreamConfig`s (fee vault, withdrawer, fee rates), each with its own admin and whitelist of streamable tokens.
-- **Admin-signed, token-denominated fees** — the config admin signs a `StreamTokenFee` (Schnorr signature) authorizing a specific fee for a specific create transaction; replay is prevented by an on-chain nonce mapping.
+- **Admin-signed, token-denominated fees** — the config admin signs a `StreamTokenFee` (Schnorr signature) authorizing a specific fee for a specific create transaction; the signed struct is bound to the config, token, stream's full amount, `expiry`, and `nonce`; replay is prevented by an on-chain nonce mapping.
 - **On-chain public-stream registry** — per-address, per-config append-only lists (`outgoing_stream_refs` / `incoming_stream_refs`) let anyone list a sender's or receiver's public streams without an off-chain indexer. Private streams are discoverable only by the wallet holding the ticket records (by design — no address correlation leaks).
 - **Wallet-agnostic TypeScript SDK** — `StreamService` talks to any wallet implementing a minimal `AleoWallet` interface, so the exact same code runs against a browser wallet adaptor (e.g. Shield) or a Node wallet built from a raw private key (`createAleoWallet`, using delegated proving + a record scanner).
 
@@ -71,7 +71,7 @@ Owning the record *is* the authorization — there's no separate access-control 
 
 ### Fee model
 
-The stream fee (`stream_fee_amount`) is denominated in the **streaming token itself** (a `u128`), not in ALEO microcredits. The config admin signs a `StreamTokenFee { config, stream_token, stream_fee_amount, expiry, nonce }` struct off-chain (see `sdk/signing.ts`); the on-chain `finalize_create_stream` verifies the Schnorr signature against the config's `admin` address, checks `now < expiry`, binds the struct to this exact `config`/`stream_token`, and consumes `nonce` from the `token_fee_nonces` mapping to block replay. `sdk/math.ts`'s `computeStreamFee` mirrors an off-chain, USD-value-tiered fee schedule an admin backend can use to size that signed fee (25 bps under $3,000, 18 bps under $10,000, 10 bps above).
+The stream fee (`stream_fee_amount`) is denominated in the **streaming token itself** (a `u128`), not in ALEO microcredits. The config admin signs a `StreamTokenFee { config, stream_token, stream_fee_amount, stream_amount, expiry, nonce }` struct off-chain (see `sdk/signing.ts`); the on-chain `finalize_create_stream` verifies the Schnorr signature against the config's `admin` address, checks `now < expiry`, binds the struct to this exact `config`/`stream_token`, asserts `stream_amount == params.amount` (so a signed fee can't be reused for a larger stream), and consumes `nonce` from the `token_fee_nonces` mapping to block replay. `sdk/math.ts`'s `computeStreamFee` mirrors an off-chain, USD-value-tiered fee schedule an admin backend can use to size that signed fee (25 bps under $3,000, 18 bps under $10,000, 10 bps above).
 
 Separately, the **auto-withdrawal fee** (paid to the config's `withdrawer` in ALEO microcredits) is computed on-chain from `duration`, `withdraw_frequency`, and the config's `base_fee`/`platform_fee` (`compute_auto_withdrawal_fee`), and mirrored off-chain by `computeAutoWithdrawalFee` for pre-flight coverage checks.
 
@@ -240,6 +240,7 @@ const rawFee = {
   config: config.configName,
   streamToken: "test_usdcx_stablecoin",
   streamFeeAmount: streamFee,
+  streamAmount: 100_000_000n, // must equal params.amount (100 tokens)
   expiry: nowSeconds() + 3600n,
   nonce: 456n, // random, single-use
 };
@@ -250,7 +251,7 @@ const txId = await client.createStreamPrivate(
   "test_usdcx_stablecoin",
   6, // token decimals
   config,
-  { ...rawFee, streamFeeAmount: String(streamFee) },
+  { ...rawFee, streamFeeAmount: String(streamFee), streamAmount: "100" },
   signature,
 );
 ```
